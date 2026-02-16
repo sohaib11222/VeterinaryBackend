@@ -1,0 +1,37 @@
+const mongoose = require('mongoose');
+
+const notificationSchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  title: {
+    type: String,
+    required: true
+  },
+  body: {
+    type: String,
+    default: null
+  },
+  type: {
+    type: String,
+    enum: ['APPOINTMENT', 'PAYMENT', 'SYSTEM', 'SUBSCRIPTION', 'CHAT', 'VACCINATION', 'WEIGHT', 'OTHER'],
+    default: 'OTHER'
+  },
+  data: {
+    type: Object,
+    default: null
+  },
+  isRead: {
+    type: Boolean,
+    default: false
+  }
+}, {
+  timestamps: true
+});
+
+// Indexes
+notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
+
+module.exports = mongoose.model('Notification', notificationSchema);

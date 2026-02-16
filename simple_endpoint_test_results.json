@@ -1,0 +1,292 @@
+{
+  "timestamp": "2026-01-24T02:39:58.336Z",
+  "summary": {
+    "total": 39,
+    "fast": 15,
+    "slow": 0,
+    "timeout": 10,
+    "error": 14
+  },
+  "details": {
+    "fast": [
+      {
+        "name": "Health Check",
+        "path": "/api/health",
+        "status": "OK",
+        "elapsed": 61,
+        "httpStatus": 200
+      },
+      {
+        "name": "List Veterinarians",
+        "path": "/api/veterinarians",
+        "status": "OK",
+        "elapsed": 94,
+        "httpStatus": 200
+      },
+      {
+        "name": "List Products",
+        "path": "/api/products",
+        "status": "OK",
+        "elapsed": 8,
+        "httpStatus": 200
+      },
+      {
+        "name": "List Pet Stores",
+        "path": "/api/pet-stores",
+        "status": "OK",
+        "elapsed": 10,
+        "httpStatus": 200
+      },
+      {
+        "name": "List Active Subscription Plans",
+        "path": "/api/subscription-plans/active",
+        "status": "OK",
+        "elapsed": 6,
+        "httpStatus": 200
+      },
+      {
+        "name": "List All Subscription Plans",
+        "path": "/api/subscription-plans",
+        "status": "OK",
+        "elapsed": 8,
+        "httpStatus": 200
+      },
+      {
+        "name": "List Blog Posts",
+        "path": "/api/blog",
+        "status": "OK",
+        "elapsed": 28,
+        "httpStatus": 200
+      },
+      {
+        "name": "List Active Insurance Companies",
+        "path": "/api/insurance",
+        "status": "OK",
+        "elapsed": 9,
+        "httpStatus": 200
+      },
+      {
+        "name": "Get Available Slots",
+        "path": "/api/availability/slots",
+        "status": "OK",
+        "elapsed": 40,
+        "httpStatus": 400
+      },
+      {
+        "name": "Check Time Slot",
+        "path": "/api/availability/check",
+        "status": "OK",
+        "elapsed": 12,
+        "httpStatus": 500
+      },
+      {
+        "name": "Get Weekly Schedule Slots",
+        "path": "/api/weekly-schedule/slots",
+        "status": "OK",
+        "elapsed": 26,
+        "httpStatus": 200
+      },
+      {
+        "name": "Get Route Info",
+        "path": "/api/mapping/route",
+        "status": "OK",
+        "elapsed": 2,
+        "httpStatus": 400
+      },
+      {
+        "name": "Get Nearby Clinics",
+        "path": "/api/mapping/nearby",
+        "status": "OK",
+        "elapsed": 3,
+        "httpStatus": 400
+      },
+      {
+        "name": "Auth Register",
+        "path": "/api/auth/register",
+        "status": "OK",
+        "elapsed": 24,
+        "httpStatus": 500
+      },
+      {
+        "name": "Auth Login",
+        "path": "/api/auth/login",
+        "status": "OK",
+        "elapsed": 9,
+        "httpStatus": 400
+      }
+    ],
+    "slow": [],
+    "timeout": [
+      {
+        "name": "List Pets (Auth Required)",
+        "path": "/api/pets",
+        "status": "TIMEOUT",
+        "elapsed": 10015,
+        "error": "TIMEOUT"
+      },
+      {
+        "name": "Pet Owner Dashboard (Auth Required)",
+        "path": "/api/pet-owners/dashboard",
+        "status": "TIMEOUT",
+        "elapsed": 10029,
+        "error": "TIMEOUT"
+      },
+      {
+        "name": "Admin Dashboard (Auth Required)",
+        "path": "/api/admin/dashboard",
+        "status": "TIMEOUT",
+        "elapsed": 10004,
+        "error": "TIMEOUT"
+      },
+      {
+        "name": "List Appointments (Auth Required)",
+        "path": "/api/appointments",
+        "status": "TIMEOUT",
+        "elapsed": 10016,
+        "error": "TIMEOUT"
+      },
+      {
+        "name": "List Medical Records (Auth Required)",
+        "path": "/api/medical-records",
+        "status": "TIMEOUT",
+        "elapsed": 10021,
+        "error": "TIMEOUT"
+      },
+      {
+        "name": "List Orders (Auth Required)",
+        "path": "/api/orders",
+        "status": "TIMEOUT",
+        "elapsed": 10013,
+        "error": "TIMEOUT"
+      },
+      {
+        "name": "List Reviews (Auth Required)",
+        "path": "/api/reviews",
+        "status": "TIMEOUT",
+        "elapsed": 10052,
+        "error": "TIMEOUT"
+      },
+      {
+        "name": "List Notifications (Auth Required)",
+        "path": "/api/notifications",
+        "status": "TIMEOUT",
+        "elapsed": 10028,
+        "error": "TIMEOUT"
+      },
+      {
+        "name": "Get Unread Notifications Count (Auth Required)",
+        "path": "/api/notifications/unread-count",
+        "status": "TIMEOUT",
+        "elapsed": 10030,
+        "error": "TIMEOUT"
+      },
+      {
+        "name": "List Vaccinations (Auth Required)",
+        "path": "/api/vaccinations",
+        "status": "TIMEOUT",
+        "elapsed": 10021,
+        "error": "TIMEOUT"
+      }
+    ],
+    "error": [
+      {
+        "name": "Get Upcoming Vaccinations (Auth Required)",
+        "path": "/api/vaccinations/upcoming",
+        "status": "ERROR",
+        "elapsed": 9788,
+        "error": "read ECONNRESET"
+      },
+      {
+        "name": "List Weight Records (Auth Required)",
+        "path": "/api/weight-records",
+        "status": "ERROR",
+        "elapsed": 7,
+        "error": ""
+      },
+      {
+        "name": "List Specializations (Auth Required)",
+        "path": "/api/specializations",
+        "status": "ERROR",
+        "elapsed": 2,
+        "error": ""
+      },
+      {
+        "name": "List Subscriptions (Auth Required)",
+        "path": "/api/subscriptions",
+        "status": "ERROR",
+        "elapsed": 3,
+        "error": ""
+      },
+      {
+        "name": "Get Chat Conversations (Auth Required)",
+        "path": "/api/chat/conversations",
+        "status": "ERROR",
+        "elapsed": 1,
+        "error": ""
+      },
+      {
+        "name": "Get Chat Unread Count (Auth Required)",
+        "path": "/api/chat/unread-count",
+        "status": "ERROR",
+        "elapsed": 2,
+        "error": ""
+      },
+      {
+        "name": "Get Balance (Auth Required)",
+        "path": "/api/balance",
+        "status": "ERROR",
+        "elapsed": 1,
+        "error": ""
+      },
+      {
+        "name": "List Transactions (Auth Required)",
+        "path": "/api/transaction",
+        "status": "ERROR",
+        "elapsed": 2,
+        "error": ""
+      },
+      {
+        "name": "Get Payment Transactions (Auth Required)",
+        "path": "/api/payment/transactions",
+        "status": "ERROR",
+        "elapsed": 1,
+        "error": ""
+      },
+      {
+        "name": "List Reschedule Requests (Auth Required)",
+        "path": "/api/reschedule-request",
+        "status": "ERROR",
+        "elapsed": 2,
+        "error": ""
+      },
+      {
+        "name": "List Admin Users (Auth Required)",
+        "path": "/api/admin/users",
+        "status": "ERROR",
+        "elapsed": 7,
+        "error": ""
+      },
+      {
+        "name": "List Admin Appointments (Auth Required)",
+        "path": "/api/admin/appointments",
+        "status": "ERROR",
+        "elapsed": 2,
+        "error": ""
+      },
+      {
+        "name": "List Admin Transactions (Auth Required)",
+        "path": "/api/admin/transactions",
+        "status": "ERROR",
+        "elapsed": 3,
+        "error": ""
+      },
+      {
+        "name": "List Admin Reviews (Auth Required)",
+        "path": "/api/admin/reviews",
+        "status": "ERROR",
+        "elapsed": 2,
+        "error": ""
+      }
+    ]
+  }
+}

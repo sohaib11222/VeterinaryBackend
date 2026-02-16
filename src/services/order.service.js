@@ -1,0 +1,645 @@
+const Order = require('../models/Order');
+const Product = require('../models/Product');
+const PetStore = require('../models/PetStore');
+const User = require('../models/User');
+const Transaction = require('../models/Transaction');
+const { ORDER_STATUS, PAYMENT_STATUS } = require('../types/enums');
+
+/**
+ * Create order
+ */
+const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = null) => {
+  if (!items || items.length === 0) {
+    throw new Error('Order items are required');
+  }
+
+  const petOwner = await User.findById(petOwnerId)
+    .maxTimeMS(2000);
+  if (!petOwner || petOwner.role !== 'PET_OWNER') {
+    throw new Error('Pet owner not found');
+  }
+
+  const productIds = items.map(item => item.productId);
+  const products = await Product.find({ _id: { $in: productIds } })
+    .lean()
+    .maxTimeMS(3000);
+
+  if (products.length !== productIds.length) {
+    throw new Error('One or more products not found');
+  }
+
+  // Group products by pet store
+  const petStoreMap = new Map();
+  const sellerStoreCache = new Map();
+
+  for (const item of items) {
+    const product = products.find(p => p._id.toString() === item.productId.toString());
+    if (!product) {
+      throw new Error(`Product ${item.productId} not found`);
+    }
+
+    if (product.stock < item.quantity) {
+      throw new Error(`Insufficient stock for product ${product.name}. Available: ${product.stock}, Requested: ${item.quantity}`);
+    }
+
+    const sellerKey = product.sellerId?.toString();
+    let petStore = sellerKey ? sellerStoreCache.get(sellerKey) : null;
+    if (!petStore) {
+      petStore = await PetStore.findOne({ ownerId: product.sellerId })
+        .lean()
+        .maxTimeMS(2000);
+      if (sellerKey) {
+        sellerStoreCache.set(sellerKey, petStore);
+      }
+    }
+    if (!petStore) {
+      throw new Error(`Pet store not found for product ${product.name}`);
+    }
+
+    const storeId = petStore._id.toString();
+    if (!petStoreMap.has(storeId)) {
+      petStoreMap.set(storeId, {
+        petStoreId: petStore._id,
+        ownerId: petStore.ownerId,
+        items: []
+      });
+    }
+
+    const itemPrice = product.discountPrice || product.price;
+    const itemTotal = itemPrice * item.quantity;
+    petStoreMap.get(storeId).items.push({
+      productId: product._id,
+      quantity: item.quantity,
+      price: product.price,
+      discountPrice: product.discountPrice,
+      total: itemTotal
+    });
+  }
+
+  const createdOrders = [];
+  for (const petStoreData of Array.from(petStoreMap.values())) {
+    const orderItems = petStoreData.items;
+    const orderSubtotal = orderItems.reduce((sum, i) => sum + (Number(i.total) || 0), 0);
+    const tax = 0;
+    const initialShipping = 0;
+    const initialTotal = orderSubtotal + initialShipping;
+
+    const order = await Order.create({
+      petOwnerId,
+      petStoreId: petStoreData.petStoreId,
+      ownerId: petStoreData.ownerId,
+      items: orderItems,
+      subtotal: orderSubtotal,
+      tax,
+      shipping: initialShipping,
+      initialShipping: initialShipping,
+      finalShipping: null,
+      total: initialTotal,
+      initialTotal: initialTotal,
+      shippingAddress: shippingAddress || {},
+      paymentMethod: null,
+      status: ORDER_STATUS.PENDING,
+      paymentStatus: PAYMENT_STATUS.UNPAID
+    });
+
+    createdOrders.push(order);
+  }
+
+  return createdOrders.length === 1 ? createdOrders[0] : { orders: createdOrders };
+};
+
+/**
+ * Get order by ID
+ */
+const getOrderById = async (orderId, userId, userRole) => {
+  const order = await Order.findById(orderId)
+    .select('petOwnerId petStoreId ownerId items transactionId status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt')
+    .lean()
+    .maxTimeMS(2000);
+
+  if (!order) {
+    throw new Error('Order not found');
+  }
+
+  // Check authorization first
+  if (userRole === 'PET_OWNER' && order.petOwnerId?.toString() !== userId.toString()) {
+    throw new Error('Unauthorized: You can only view your own orders');
+  }
+
+  if ((userRole === 'PET_STORE' || userRole === 'PARAPHARMACY') && order.ownerId?.toString() !== userId.toString()) {
+    throw new Error('Unauthorized: You can only view orders for your pet store');
+  }
+
+  // Populate separately
+  const [petOwner, petStore, owner, products, transaction] = await Promise.all([
+    order.petOwnerId ? User.findById(order.petOwnerId)
+      .select('name email phone')
+      .lean()
+      .maxTimeMS(1000) : null,
+    order.petStoreId ? PetStore.findById(order.petStoreId)
+      .lean()
+      .maxTimeMS(1000) : null,
+    order.ownerId ? User.findById(order.ownerId)
+      .select('name email')
+      .lean()
+      .maxTimeMS(1000) : null,
+    order.items?.length > 0 ? Product.find({ _id: { $in: order.items.map(i => i.productId).filter(Boolean) } })
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    order.transactionId ? Transaction.findById(order.transactionId)
+      .lean()
+      .maxTimeMS(1000) : null
+  ]);
+
+  // Create product map
+  const productMap = {};
+  products.forEach(p => { productMap[p._id.toString()] = p; });
+
+  return {
+    ...order,
+    petOwnerId: petOwner,
+    petStoreId: petStore,
+    ownerId: owner,
+    transactionId: transaction,
+    items: order.items?.map(item => ({
+      ...item,
+      productId: item.productId ? productMap[item.productId.toString()] : null
+    })) || []
+  };
+};
+
+/**
+ * Get pet owner orders
+ */
+const getPetOwnerOrders = async (petOwnerId, options = {}) => {
+  const { status, paymentStatus, page = 1, limit = 10 } = options;
+  const skip = (page - 1) * limit;
+
+  const query = { petOwnerId };
+  if (status) {
+    query.status = status.toUpperCase();
+  }
+  if (paymentStatus) {
+    query.paymentStatus = paymentStatus.toUpperCase();
+  }
+
+  const [ordersRaw, total] = await Promise.all([
+    Order.find(query)
+      .select('petStoreId ownerId items status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean()
+      .maxTimeMS(3000),
+    Order.countDocuments(query).maxTimeMS(2000)
+  ]);
+
+  // Populate separately
+  const storeIds = [...new Set(ordersRaw.map(o => o.petStoreId?.toString()).filter(Boolean))];
+  const ownerIds = [...new Set(ordersRaw.map(o => o.ownerId?.toString()).filter(Boolean))];
+  const productIds = [...new Set(ordersRaw.flatMap(o => o.items?.map(i => i.productId?.toString()) || []).filter(Boolean))];
+
+  const [stores, owners, products] = await Promise.all([
+    storeIds.length > 0 ? PetStore.find({ _id: { $in: storeIds } })
+      .select('name logo')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    ownerIds.length > 0 ? User.find({ _id: { $in: ownerIds } })
+      .select('name')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    productIds.length > 0 ? Product.find({ _id: { $in: productIds } })
+      .select('name images price discountPrice')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([])
+  ]);
+
+  // Create lookup maps
+  const storeMap = {};
+  stores.forEach(s => { storeMap[s._id.toString()] = s; });
+  const ownerMap = {};
+  owners.forEach(o => { ownerMap[o._id.toString()] = o; });
+  const productMap = {};
+  products.forEach(p => { productMap[p._id.toString()] = p; });
+
+  // Attach populated data
+  const orders = ordersRaw.map(order => ({
+    ...order,
+    petStoreId: order.petStoreId ? storeMap[order.petStoreId.toString()] : null,
+    ownerId: order.ownerId ? ownerMap[order.ownerId.toString()] : null,
+    items: order.items?.map(item => ({
+      ...item,
+      productId: item.productId ? productMap[item.productId.toString()] : null
+    })) || []
+  }));
+
+  return {
+    orders,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit)
+    }
+  };
+};
+
+/**
+ * Get pet store orders
+ */
+const getPetStoreOrders = async (ownerId, options = {}) => {
+  const { status, paymentStatus, page = 1, limit = 10 } = options;
+  const skip = (page - 1) * limit;
+
+  const query = { ownerId };
+  if (status) {
+    query.status = status.toUpperCase();
+  }
+  if (paymentStatus) {
+    query.paymentStatus = paymentStatus.toUpperCase();
+  }
+
+  const [ordersRaw, total] = await Promise.all([
+    Order.find(query)
+      .select('petOwnerId petStoreId ownerId items status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean()
+      .maxTimeMS(3000),
+    Order.countDocuments(query).maxTimeMS(2000)
+  ]);
+
+  // Populate separately
+  const petOwnerIds = [...new Set(ordersRaw.map(o => o.petOwnerId?.toString()).filter(Boolean))];
+  const storeIds = [...new Set(ordersRaw.map(o => o.petStoreId?.toString()).filter(Boolean))];
+  const productIds = [...new Set(ordersRaw.flatMap(o => o.items?.map(i => i.productId?.toString()) || []).filter(Boolean))];
+
+  const [petOwners, stores, products] = await Promise.all([
+    petOwnerIds.length > 0 ? User.find({ _id: { $in: petOwnerIds } })
+      .select('name email phone')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    storeIds.length > 0 ? PetStore.find({ _id: { $in: storeIds } })
+      .select('name')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    productIds.length > 0 ? Product.find({ _id: { $in: productIds } })
+      .select('name images price discountPrice')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([])
+  ]);
+
+  // Create lookup maps
+  const petOwnerMap = {};
+  petOwners.forEach(p => { petOwnerMap[p._id.toString()] = p; });
+  const storeMap = {};
+  stores.forEach(s => { storeMap[s._id.toString()] = s; });
+  const productMap = {};
+  products.forEach(p => { productMap[p._id.toString()] = p; });
+
+  // Attach populated data
+  const orders = ordersRaw.map(order => ({
+    ...order,
+    petOwnerId: order.petOwnerId ? petOwnerMap[order.petOwnerId.toString()] : null,
+    petStoreId: order.petStoreId ? storeMap[order.petStoreId.toString()] : null,
+    items: order.items?.map(item => ({
+      ...item,
+      productId: item.productId ? productMap[item.productId.toString()] : null
+    })) || []
+  }));
+
+  return {
+    orders,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit)
+    }
+  };
+};
+
+/**
+ * Get all orders (admin only)
+ */
+const getAllOrders = async (options = {}) => {
+  const { status, paymentStatus, petStoreId, petOwnerId, page = 1, limit = 10 } = options;
+  const skip = (page - 1) * limit;
+
+  const query = {};
+  if (status) {
+    query.status = status.toUpperCase();
+  }
+  if (petStoreId) {
+    query.petStoreId = petStoreId;
+  }
+  if (petOwnerId) {
+    query.petOwnerId = petOwnerId;
+  }
+  if (paymentStatus) {
+    query.paymentStatus = paymentStatus.toUpperCase();
+  }
+
+  const [ordersRaw, total] = await Promise.all([
+    Order.find(query)
+      .select('petOwnerId petStoreId ownerId items status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean()
+      .maxTimeMS(3000),
+    Order.countDocuments(query).maxTimeMS(2000)
+  ]);
+
+  // Populate separately
+  const petOwnerIds = [...new Set(ordersRaw.map(o => o.petOwnerId?.toString()).filter(Boolean))];
+  const storeIds = [...new Set(ordersRaw.map(o => o.petStoreId?.toString()).filter(Boolean))];
+  const ownerIds = [...new Set(ordersRaw.map(o => o.ownerId?.toString()).filter(Boolean))];
+  const productIds = [...new Set(ordersRaw.flatMap(o => o.items?.map(i => i.productId?.toString()) || []).filter(Boolean))];
+
+  const [petOwners, stores, owners, products] = await Promise.all([
+    petOwnerIds.length > 0 ? User.find({ _id: { $in: petOwnerIds } })
+      .select('name email phone')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    storeIds.length > 0 ? PetStore.find({ _id: { $in: storeIds } })
+      .select('name logo')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    ownerIds.length > 0 ? User.find({ _id: { $in: ownerIds } })
+      .select('name email')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    productIds.length > 0 ? Product.find({ _id: { $in: productIds } })
+      .select('name images price discountPrice')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([])
+  ]);
+
+  // Create lookup maps
+  const petOwnerMap = {};
+  petOwners.forEach(p => { petOwnerMap[p._id.toString()] = p; });
+  const storeMap = {};
+  stores.forEach(s => { storeMap[s._id.toString()] = s; });
+  const ownerMap = {};
+  owners.forEach(o => { ownerMap[o._id.toString()] = o; });
+  const productMap = {};
+  products.forEach(p => { productMap[p._id.toString()] = p; });
+
+  // Attach populated data
+  const orders = ordersRaw.map(order => ({
+    ...order,
+    petOwnerId: order.petOwnerId ? petOwnerMap[order.petOwnerId.toString()] : null,
+    petStoreId: order.petStoreId ? storeMap[order.petStoreId.toString()] : null,
+    ownerId: order.ownerId ? ownerMap[order.ownerId.toString()] : null,
+    items: order.items?.map(item => ({
+      ...item,
+      productId: item.productId ? productMap[item.productId.toString()] : null
+    })) || []
+  }));
+
+  return {
+    orders,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit)
+    }
+  };
+};
+
+/**
+ * Update order status
+ */
+const updateOrderStatus = async (orderId, status, userId, userRole) => {
+  const order = await Order.findById(orderId);
+
+  if (!order) {
+    throw new Error('Order not found');
+  }
+
+  if ((userRole === 'PET_STORE' || userRole === 'PARAPHARMACY') && order.ownerId.toString() !== userId.toString()) {
+    throw new Error('Unauthorized: You can only update orders for your pet store');
+  }
+
+  if (userRole !== 'ADMIN' && userRole !== 'PET_STORE' && userRole !== 'PARAPHARMACY') {
+    throw new Error('Unauthorized: Only pet store owners and admins can update order status');
+  }
+
+  if (order.paymentStatus !== 'PAID' && status.toUpperCase() !== 'CANCELLED') {
+    throw new Error('Cannot update order status until the order has been paid');
+  }
+
+  const validStatuses = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED'];
+  if (!validStatuses.includes(status.toUpperCase())) {
+    throw new Error(`Invalid status. Valid statuses: ${validStatuses.join(', ')}`);
+  }
+
+  order.status = status.toUpperCase();
+
+  if (status.toUpperCase() === 'DELIVERED') {
+    order.deliveredAt = new Date();
+  }
+
+  await order.save();
+  return order;
+};
+
+/**
+ * Update shipping fee
+ */
+const updateShippingFee = async (orderId, shippingFee, userId, userRole) => {
+  const order = await Order.findById(orderId);
+
+  if (!order) {
+    throw new Error('Order not found');
+  }
+
+  if (userRole !== 'PET_STORE' && userRole !== 'PARAPHARMACY' || order.ownerId.toString() !== userId.toString()) {
+    throw new Error('Unauthorized: Only the pet store owner can update shipping fee');
+  }
+
+  if (order.paymentStatus === 'PAID') {
+    throw new Error('Cannot update shipping fee for an order that has already been paid');
+  }
+
+  if (typeof shippingFee !== 'number' || shippingFee < 0) {
+    throw new Error('Shipping fee must be a non-negative number');
+  }
+
+  const finalShipping = shippingFee;
+  const finalTotal = (Number(order.subtotal) || 0) + finalShipping;
+
+  order.tax = 0;
+  order.shipping = finalShipping;
+  order.finalShipping = finalShipping;
+  order.total = finalTotal;
+  order.shippingUpdatedAt = new Date();
+  order.requiresPaymentUpdate = false;
+
+  await order.save();
+  return order;
+};
+
+/**
+ * Pay for order
+ */
+const payForOrder = async (orderId, userId, userRole, paymentMethod = 'DUMMY') => {
+  const balanceService = require('./balance.service');
+  
+  // Fetch order WITHOUT .lean() so we can call .save() later
+  const order = await Order.findById(orderId)
+    .maxTimeMS(2000);
+
+  if (!order) {
+    throw new Error('Order not found');
+  }
+
+  if (userRole !== 'PET_OWNER') {
+    throw new Error('Unauthorized: Only pet owners can pay for orders');
+  }
+
+  if (order.petOwnerId.toString() !== userId.toString()) {
+    throw new Error('Unauthorized: You can only pay for your own orders');
+  }
+
+  if (order.paymentStatus === 'PAID') {
+    throw new Error('Order is already paid');
+  }
+
+  if (order.finalShipping === null || order.finalShipping === undefined) {
+    throw new Error('Shipping fee must be set by the pet store owner before payment');
+  }
+
+  if (paymentMethod && !['DUMMY', 'STRIPE'].includes(String(paymentMethod).toUpperCase())) {
+    throw new Error('Unsupported payment method');
+  }
+
+  // Get product IDs for stock checking
+  const productIds = [...new Set(order.items.map(item => item.productId?.toString()).filter(Boolean))];
+  
+  // Fetch products WITHOUT .lean() so we can call .save() later
+  const products = productIds.length > 0 ? await Product.find({ _id: { $in: productIds } })
+    .maxTimeMS(2000) : [];
+
+  // Check stock before creating transaction
+  for (const item of order.items) {
+    const product = products.find(p => p._id.toString() === item.productId?.toString());
+    if (product) {
+      if (product.stock < item.quantity) {
+        throw new Error(`Insufficient stock for product ${product.name}. Available: ${product.stock}, Requested: ${item.quantity}`);
+      }
+    }
+  }
+
+  // Create transaction
+  const transaction = await Transaction.create({
+    userId: order.petOwnerId,
+    amount: order.total,
+    currency: 'EUR',
+    relatedOrderId: orderId,
+    status: 'SUCCESS',
+    provider: paymentMethod,
+    providerReference: `ORD-${Date.now()}-${orderId}`
+  });
+
+  // Update order
+  order.paymentStatus = 'PAID';
+  order.status = 'CONFIRMED';
+  order.paymentMethod = paymentMethod;
+  order.transactionId = transaction._id;
+  await order.save();
+
+  // Reduce product stock
+  for (const item of order.items) {
+    const product = products.find(p => p._id.toString() === item.productId?.toString());
+    if (product) {
+      product.stock -= item.quantity;
+      await product.save();
+    }
+  }
+
+  // Credit seller balance
+  try {
+    await balanceService.creditBalance(
+      order.ownerId.toString(),
+      order.total,
+      'PRODUCT',
+      {
+        orderId: order._id.toString(),
+        orderNumber: order.orderNumber,
+        transactionId: transaction._id.toString()
+      }
+    );
+  } catch (error) {
+    console.error('Error crediting seller balance:', error);
+  }
+
+  return order;
+};
+
+/**
+ * Cancel order
+ */
+const cancelOrder = async (orderId, userId, userRole) => {
+  // Fetch order WITHOUT .lean() so we can call .save() later
+  const order = await Order.findById(orderId)
+    .maxTimeMS(2000);
+
+  if (!order) {
+    throw new Error('Order not found');
+  }
+
+  if (userRole === 'PET_OWNER' && order.petOwnerId.toString() !== userId.toString()) {
+    throw new Error('Unauthorized: You can only cancel your own orders');
+  }
+
+  if ((userRole === 'PET_STORE' || userRole === 'PARAPHARMACY') && order.ownerId.toString() !== userId.toString()) {
+    throw new Error('Unauthorized: You can only cancel orders for your pet store');
+  }
+
+  if (!['PENDING', 'CONFIRMED'].includes(order.status)) {
+    throw new Error(`Cannot cancel order with status: ${order.status}`);
+  }
+
+  if (order.paymentStatus === 'PAID') {
+    throw new Error('Cannot cancel an order that has already been paid');
+  }
+
+  // Get product IDs for stock restoration
+  const productIds = [...new Set(order.items.map(item => item.productId?.toString()).filter(Boolean))];
+  
+  // Fetch products WITHOUT .lean() so we can call .save() later
+  const products = productIds.length > 0 ? await Product.find({ _id: { $in: productIds } })
+    .maxTimeMS(2000) : [];
+
+  // Restore product stock (only if order hasn't been paid or shipped)
+  if (order.paymentStatus !== 'PAID' || order.status !== 'SHIPPED') {
+    for (const item of order.items) {
+      const product = products.find(p => p._id.toString() === item.productId?.toString());
+      if (product) {
+        product.stock += item.quantity;
+        await product.save();
+      }
+    }
+  }
+
+  order.status = 'CANCELLED';
+  await order.save();
+
+  return order;
+};
+
+module.exports = {
+  createOrder,
+  getOrderById,
+  getPetOwnerOrders,
+  getPetStoreOrders,
+  getAllOrders,
+  updateOrderStatus,
+  updateShippingFee,
+  payForOrder,
+  cancelOrder
+};

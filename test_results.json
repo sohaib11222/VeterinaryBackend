@@ -1,0 +1,156 @@
+{
+  "timestamp": "2026-01-24T02:08:49.334Z",
+  "summary": {
+    "total": 41,
+    "passed": 16,
+    "failed": 4,
+    "timeout": 21,
+    "errors": 0
+  },
+  "timeouts": [
+    {
+      "endpoint": "POST /api/specializations",
+      "duration": 10018,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/pet-owners/dashboard",
+      "duration": 10015,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/pet-owners/appointments",
+      "duration": 10018,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/pet-owners/payments",
+      "duration": 10007,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/medical-records",
+      "duration": 10015,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/medical-records/507f1f77bcf86cd799439011",
+      "duration": 10007,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/appointments",
+      "duration": 10017,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/appointments/507f1f77bcf86cd799439011",
+      "duration": 10010,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/pets",
+      "duration": 10015,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/pets/507f1f77bcf86cd799439011",
+      "duration": 10016,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/reviews",
+      "duration": 10016,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/reviews/507f1f77bcf86cd799439011",
+      "duration": 10013,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/notifications",
+      "duration": 10004,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/notifications/unread-count",
+      "duration": 10015,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/vaccinations",
+      "duration": 10005,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/weight-records",
+      "duration": 10006,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/orders",
+      "duration": 10005,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/orders/507f1f77bcf86cd799439011",
+      "duration": 10017,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/admin/dashboard",
+      "duration": 10006,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "GET /api/admin/users",
+      "duration": 10017,
+      "error": "Request timeout after 10000ms"
+    },
+    {
+      "endpoint": "POST /api/auth/approve-veterinarian",
+      "duration": 10019,
+      "error": "Request timeout after 10000ms"
+    }
+  ],
+  "failures": [
+    {
+      "endpoint": "POST /api/auth/register",
+      "status": 500,
+      "duration": 36,
+      "error": {
+        "success": false,
+        "message": "User with this email or phone already exists"
+      }
+    },
+    {
+      "endpoint": "GET /api/products/507f1f77bcf86cd799439011",
+      "status": 500,
+      "duration": 18,
+      "error": {
+        "success": false,
+        "message": "Product not found"
+      }
+    },
+    {
+      "endpoint": "GET /api/veterinarians/507f1f77bcf86cd799439011",
+      "status": 500,
+      "duration": 9,
+      "error": {
+        "success": false,
+        "message": "Veterinarian profile not found"
+      }
+    },
+    {
+      "endpoint": "GET /api/blog/507f1f77bcf86cd799439011",
+      "status": 500,
+      "duration": 57,
+      "error": {
+        "success": false,
+        "message": "Blog post not found"
+      }
+    }
+  ],
+  "errors": []
+}

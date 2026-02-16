@@ -1,0 +1,1981 @@
+{
+  "info": {
+    "name": "Veterinary Backend - Complete API Collection",
+    "description": "Complete API collection for Veterinary Backend with all routes organized by modules",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "veterinary-backend-complete"
+  },
+  "item": [
+    {
+      "name": "🔐 Authentication",
+      "item": [
+        {
+          "name": "Register Pet Owner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"phone\": \"+1234567890\",\n  \"password\": \"password123\",\n  \"role\": \"PET_OWNER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Register a new pet owner. Pet owners are auto-approved."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set(\"pet_owner_token\", response.data.token);",
+                  "    pm.environment.set(\"pet_owner_refresh_token\", response.data.refreshToken);",
+                  "    pm.environment.set(\"pet_owner_id\", response.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "Success",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"phone\": \"+1234567890\",\n  \"password\": \"password123\",\n  \"role\": \"PET_OWNER\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/auth/register",
+                  "host": ["{{base_url}}"],
+                  "path": ["auth", "register"]
+                }
+              },
+              "status": "OK",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Registration successful\",\n  \"data\": {\n    \"user\": {\n      \"id\": \"507f1f77bcf86cd799439011\",\n      \"name\": \"John Doe\",\n      \"email\": \"john@example.com\",\n      \"phone\": \"+1234567890\",\n      \"role\": \"PET_OWNER\",\n      \"status\": \"APPROVED\"\n    },\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"refreshToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Register Veterinarian",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dr. Jane Smith\",\n  \"email\": \"jane@example.com\",\n  \"phone\": \"+1234567891\",\n  \"password\": \"password123\",\n  \"role\": \"VETERINARIAN\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Register a new veterinarian. Veterinarians require admin approval (status: PENDING)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set(\"veterinarian_token\", response.data.token);",
+                  "    pm.environment.set(\"veterinarian_refresh_token\", response.data.refreshToken);",
+                  "    pm.environment.set(\"veterinarian_id\", response.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john@example.com\",\n  \"password\": \"password123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Login with email and password. Returns JWT token and refresh token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    const role = response.data.user.role;",
+                  "    if (role === 'PET_OWNER') {",
+                  "        pm.environment.set(\"pet_owner_token\", response.data.token);",
+                  "        pm.environment.set(\"pet_owner_refresh_token\", response.data.refreshToken);",
+                  "    } else if (role === 'VETERINARIAN') {",
+                  "        pm.environment.set(\"veterinarian_token\", response.data.token);",
+                  "        pm.environment.set(\"veterinarian_refresh_token\", response.data.refreshToken);",
+                  "    } else if (role === 'ADMIN') {",
+                  "        pm.environment.set(\"admin_token\", response.data.token);",
+                  "        pm.environment.set(\"admin_refresh_token\", response.data.refreshToken);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"oldPassword\": \"password123\",\n  \"newPassword\": \"newpassword123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/change-password",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "change-password"]
+            },
+            "description": "Change password for authenticated user. Requires JWT token."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{pet_owner_refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh-token",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh-token"]
+            },
+            "description": "Get new access token using refresh token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set(\"pet_owner_token\", response.data.token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forgot Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/forgot-password",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "forgot-password"]
+            },
+            "description": "Request password reset code. Code will be sent to email."
+          }
+        },
+        {
+          "name": "Verify Reset Code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john@example.com\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/verify-reset-code",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "verify-reset-code"]
+            },
+            "description": "Verify password reset code."
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john@example.com\",\n  \"code\": \"123456\",\n  \"newPassword\": \"newpassword123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/reset-password",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "reset-password"]
+            },
+            "description": "Reset password with verified code."
+          }
+        },
+        {
+          "name": "Approve Veterinarian (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"veterinarianId\": \"{{veterinarian_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/approve-veterinarian",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "approve-veterinarian"]
+            },
+            "description": "Approve a pending veterinarian. Admin only."
+          }
+        },
+        {
+          "name": "Reject Veterinarian (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"veterinarianId\": \"{{veterinarian_id}}\",\n  \"reason\": \"Incomplete documentation\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/reject-veterinarian",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "reject-veterinarian"]
+            },
+            "description": "Reject a pending veterinarian. Admin only."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🐾 Pet Management",
+      "item": [
+        {
+          "name": "Create Pet",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Buddy\",\n  \"species\": \"DOG\",\n  \"breed\": \"Golden Retriever\",\n  \"dateOfBirth\": \"2020-01-15\",\n  \"gender\": \"MALE\",\n  \"weight\": {\n    \"value\": 25,\n    \"unit\": \"kg\"\n  },\n  \"color\": \"Golden\",\n  \"microchipNumber\": \"123456789012345\",\n  \"spayNeuterStatus\": \"NEUTERED\",\n  \"medicalConditions\": [],\n  \"allergies\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/pets",
+              "host": ["{{base_url}}"],
+              "path": ["pets"]
+            },
+            "description": "Create a new pet profile. Requires PET_OWNER role. Species: DOG, CAT, BIRD, RABBIT, REPTILE, FISH, HAMSTER, GUINEA_PIG, FERRET, HORSE, OTHER. Gender: MALE, FEMALE, NEUTERED, SPAYED, UNKNOWN."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set(\"pet_id\", response.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Pet by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/pets/{{pet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["pets", "{{pet_id}}"]
+            },
+            "description": "Get pet details by ID. Only pet owner can access their pets."
+          }
+        },
+        {
+          "name": "List Pets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/pets?species=DOG&isActive=true",
+              "host": ["{{base_url}}"],
+              "path": ["pets"],
+              "query": [
+                {
+                  "key": "species",
+                  "value": "DOG",
+                  "description": "Filter by species (optional)"
+                },
+                {
+                  "key": "isActive",
+                  "value": "true",
+                  "description": "Filter by active status (optional, default: true)"
+                }
+              ]
+            },
+            "description": "List all pets for authenticated pet owner. Supports filtering by species and active status."
+          }
+        },
+        {
+          "name": "Update Pet",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"weight\": {\n    \"value\": 27,\n    \"unit\": \"kg\"\n  },\n  \"color\": \"Golden Brown\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/pets/{{pet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["pets", "{{pet_id}}"]
+            },
+            "description": "Update pet information. All fields are optional."
+          }
+        },
+        {
+          "name": "Delete Pet",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/pets/{{pet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["pets", "{{pet_id}}"]
+            },
+            "description": "Soft delete a pet (sets isActive to false). Medical records are preserved."
+          }
+        }
+      ]
+    },
+    {
+      "name": "👤 Pet Owner",
+      "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/pet-owners/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["pet-owners", "dashboard"]
+            },
+            "description": "Get pet owner dashboard with statistics, upcoming appointments, recent activity. Requires PET_OWNER role."
+          }
+        }
+      ]
+    },
+    {
+      "name": "👨‍⚕️ Veterinarian",
+      "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/veterinarians/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["veterinarians", "dashboard"]
+            },
+            "description": "Get veterinarian dashboard with statistics, upcoming appointments, recent activity. Requires VETERINARIAN role."
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/veterinarians/profile",
+              "host": ["{{base_url}}"],
+              "path": ["veterinarians", "profile"]
+            },
+            "description": "Get veterinarian's own profile."
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Dr.\",\n  \"biography\": \"Experienced veterinarian...\",\n  \"specializations\": [\"SMALL_ANIMAL\", \"SURGERY\"],\n  \"experienceYears\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/veterinarians/profile",
+              "host": ["{{base_url}}"],
+              "path": ["veterinarians", "profile"]
+            },
+            "description": "Update veterinarian profile."
+          }
+        },
+        {
+          "name": "Get Public Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/veterinarians/{{veterinarian_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["veterinarians", "{{veterinarian_id}}"]
+            },
+            "description": "Get public veterinarian profile. No authentication required."
+          }
+        },
+        {
+          "name": "List Veterinarians",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/veterinarians?specialization=SMALL_ANIMAL&city=New York",
+              "host": ["{{base_url}}"],
+              "path": ["veterinarians"],
+              "query": [
+                {
+                  "key": "specialization",
+                  "value": "SMALL_ANIMAL",
+                  "description": "Filter by specialization (optional)"
+                },
+                {
+                  "key": "city",
+                  "value": "New York",
+                  "description": "Filter by city (optional)"
+                }
+              ]
+            },
+            "description": "List all approved veterinarians. Public endpoint. Supports filtering."
+          }
+        }
+      ]
+    },
+    {
+      "name": "📅 Appointments",
+      "item": [
+        {
+          "name": "Create Appointment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"veterinarianId\": \"{{veterinarian_id}}\",\n  \"petId\": \"{{pet_id}}\",\n  \"appointmentDate\": \"2026-02-01\",\n  \"appointmentTime\": \"10:00\",\n  \"appointmentDuration\": 30,\n  \"bookingType\": \"VISIT\",\n  \"reason\": \"Annual checkup\",\n  \"petSymptoms\": \"None\",\n  \"isEmergency\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/appointments",
+              "host": ["{{base_url}}"],
+              "path": ["appointments"]
+            },
+            "description": "Create a new appointment for a pet. Requires PET_OWNER role. bookingType: VISIT or ONLINE."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set(\"appointment_id\", response.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Appointment by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/appointments/{{appointment_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["appointments", "{{appointment_id}}"]
+            },
+            "description": "Get appointment details. Pet owners see their appointments, veterinarians see their appointments."
+          }
+        },
+        {
+          "name": "List Appointments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/appointments?status=PENDING&petId={{pet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["appointments"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "description": "Filter by status (optional)"
+                },
+                {
+                  "key": "petId",
+                  "value": "{{pet_id}}",
+                  "description": "Filter by pet ID (optional)"
+                }
+              ]
+            },
+            "description": "List appointments. Auto-filtered by role (pet owner sees their appointments, veterinarian sees their appointments)."
+          }
+        },
+        {
+          "name": "Accept Appointment (Veterinarian)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/appointments/{{appointment_id}}/accept",
+              "host": ["{{base_url}}"],
+              "path": ["appointments", "{{appointment_id}}", "accept"]
+            },
+            "description": "Accept a pending appointment. Veterinarian only."
+          }
+        },
+        {
+          "name": "Reject Appointment (Veterinarian)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Unavailable at this time\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/appointments/{{appointment_id}}/reject",
+              "host": ["{{base_url}}"],
+              "path": ["appointments", "{{appointment_id}}", "reject"]
+            },
+            "description": "Reject a pending appointment. Veterinarian only."
+          }
+        },
+        {
+          "name": "Cancel Appointment (Pet Owner)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Pet is feeling better\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/appointments/{{appointment_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["appointments", "{{appointment_id}}", "cancel"]
+            },
+            "description": "Cancel an appointment. Pet owner only."
+          }
+        },
+        {
+          "name": "Complete Appointment (Veterinarian)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/appointments/{{appointment_id}}/complete",
+              "host": ["{{base_url}}"],
+              "path": ["appointments", "{{appointment_id}}", "complete"]
+            },
+            "description": "Mark appointment as completed. Veterinarian only."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏥 Medical Records",
+      "item": [
+        {
+          "name": "Create Medical Record",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"petId\": \"{{pet_id}}\",\n  \"title\": \"Annual Checkup Report\",\n  \"description\": \"Routine checkup\",\n  \"recordType\": \"GENERAL\",\n  \"fileUrl\": \"https://example.com/report.pdf\",\n  \"relatedAppointmentId\": \"{{appointment_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/medical-records",
+              "host": ["{{base_url}}"],
+              "path": ["medical-records"]
+            },
+            "description": "Create a medical record for a pet. recordType: VACCINATION, SURGERY, LAB_REPORT, XRAY, PRESCRIPTION, WEIGHT, GENERAL, OTHER."
+          }
+        },
+        {
+          "name": "Get Medical Records",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/medical-records?petId={{pet_id}}&recordType=VACCINATION",
+              "host": ["{{base_url}}"],
+              "path": ["medical-records"],
+              "query": [
+                {
+                  "key": "petId",
+                  "value": "{{pet_id}}",
+                  "description": "Filter by pet ID (required)"
+                },
+                {
+                  "key": "recordType",
+                  "value": "VACCINATION",
+                  "description": "Filter by record type (optional)"
+                }
+              ]
+            },
+            "description": "Get medical records for a pet. Filter by petId (required) and optionally by recordType."
+          }
+        },
+        {
+          "name": "Delete Medical Record",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/medical-records/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["medical-records", "{{record_id}}"]
+            },
+            "description": "Delete a medical record. Pet owner only."
+          }
+        }
+      ]
+    },
+    {
+      "name": "💉 Vaccinations",
+      "item": [
+        {
+          "name": "Create Vaccination",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"petId\": \"{{pet_id}}\",\n  \"vaccinationType\": \"Rabies\",\n  \"vaccinationDate\": \"2026-01-24\",\n  \"nextDueDate\": \"2027-01-24\",\n  \"batchNumber\": \"BATCH123\",\n  \"certificateUrl\": \"https://example.com/cert.pdf\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/vaccinations",
+              "host": ["{{base_url}}"],
+              "path": ["vaccinations"]
+            },
+            "description": "Create a vaccination record. Veterinarian or pet owner can create."
+          }
+        },
+        {
+          "name": "Get Vaccinations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/vaccinations?petId={{pet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["vaccinations"],
+              "query": [
+                {
+                  "key": "petId",
+                  "value": "{{pet_id}}",
+                  "description": "Filter by pet ID (required)"
+                }
+              ]
+            },
+            "description": "Get vaccination records for a pet."
+          }
+        },
+        {
+          "name": "Get Upcoming Vaccinations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/vaccinations/upcoming?petId={{pet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["vaccinations", "upcoming"],
+              "query": [
+                {
+                  "key": "petId",
+                  "value": "{{pet_id}}",
+                  "description": "Filter by pet ID (optional)"
+                }
+              ]
+            },
+            "description": "Get upcoming vaccinations (due within next 30 days)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "⚖️ Weight Records",
+      "item": [
+        {
+          "name": "Create Weight Record",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"petId\": \"{{pet_id}}\",\n  \"weight\": {\n    \"value\": 25.5,\n    \"unit\": \"kg\"\n  },\n  \"date\": \"2026-01-24\",\n  \"notes\": \"Regular checkup\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/weight-records",
+              "host": ["{{base_url}}"],
+              "path": ["weight-records"]
+            },
+            "description": "Create a weight record for a pet. Unit: kg or lbs."
+          }
+        },
+        {
+          "name": "Get Weight Records",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/weight-records?petId={{pet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["weight-records"],
+              "query": [
+                {
+                  "key": "petId",
+                  "value": "{{pet_id}}",
+                  "description": "Filter by pet ID (required)"
+                }
+              ]
+            },
+            "description": "Get weight history for a pet."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🛍️ Products",
+      "item": [
+        {
+          "name": "List Products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/products?petType=DOG&category=Food",
+              "host": ["{{base_url}}"],
+              "path": ["products"],
+              "query": [
+                {
+                  "key": "petType",
+                  "value": "DOG",
+                  "description": "Filter by pet type (optional)"
+                },
+                {
+                  "key": "category",
+                  "value": "Food",
+                  "description": "Filter by category (optional)"
+                }
+              ]
+            },
+            "description": "List all active products. Public endpoint. Supports filtering by petType and category."
+          }
+        },
+        {
+          "name": "Get Product by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["products", "{{product_id}}"]
+            },
+            "description": "Get product details. Public endpoint."
+          }
+        },
+        {
+          "name": "Create Product (Veterinarian/Pet Store)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Premium Dog Food\",\n  \"description\": \"High quality dog food\",\n  \"price\": 49.99,\n  \"discountPrice\": 39.99,\n  \"stock\": 100,\n  \"category\": \"Food\",\n  \"petType\": [\"DOG\"],\n  \"tags\": [\"premium\", \"nutrition\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": ["{{base_url}}"],
+              "path": ["products"]
+            },
+            "description": "Create a new product. Requires VETERINARIAN or PET_STORE role with active subscription."
+          }
+        },
+        {
+          "name": "Update Product",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 45.99,\n  \"stock\": 150\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["products", "{{product_id}}"]
+            },
+            "description": "Update product. Only product owner can update."
+          }
+        },
+        {
+          "name": "Delete Product",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["products", "{{product_id}}"]
+            },
+            "description": "Delete product (soft delete). Only product owner can delete."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🛒 Orders",
+      "item": [
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"petStoreId\": \"{{pet_store_id}}\",\n  \"items\": [\n    {\n      \"productId\": \"{{product_id}}\",\n      \"quantity\": 2,\n      \"price\": 49.99\n    }\n  ],\n  \"shippingAddress\": {\n    \"line1\": \"123 Main St\",\n    \"city\": \"New York\",\n    \"state\": \"NY\",\n    \"zip\": \"10001\",\n    \"country\": \"USA\"\n  },\n  \"paymentMethod\": \"STRIPE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/orders",
+              "host": ["{{base_url}}"],
+              "path": ["orders"]
+            },
+            "description": "Create a new order. Requires PET_OWNER role."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.environment.set(\"order_id\", response.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Order by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["orders", "{{order_id}}"]
+            },
+            "description": "Get order details. Pet owners see their orders, pet store owners see their orders."
+          }
+        },
+        {
+          "name": "List Orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders?status=PENDING",
+              "host": ["{{base_url}}"],
+              "path": ["orders"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "description": "Filter by status (optional)"
+                }
+              ]
+            },
+            "description": "List orders. Auto-filtered by role."
+          }
+        },
+        {
+          "name": "Update Order Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SHIPPED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["orders", "{{order_id}}", "status"]
+            },
+            "description": "Update order status. Pet store owner only. Status: PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED, REFUNDED."
+          }
+        }
+      ]
+    },
+    {
+      "name": "⭐ Reviews",
+      "item": [
+        {
+          "name": "Create Review",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"veterinarianId\": \"{{veterinarian_id}}\",\n  \"petId\": \"{{pet_id}}\",\n  \"appointmentId\": \"{{appointment_id}}\",\n  \"rating\": 5,\n  \"reviewText\": \"Excellent service!\",\n  \"reviewType\": \"APPOINTMENT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/reviews",
+              "host": ["{{base_url}}"],
+              "path": ["reviews"]
+            },
+            "description": "Create a review for a veterinarian. Rating: 1-5. reviewType: OVERALL or APPOINTMENT."
+          }
+        },
+        {
+          "name": "Get Reviews",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/reviews?veterinarianId={{veterinarian_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["reviews"],
+              "query": [
+                {
+                  "key": "veterinarianId",
+                  "value": "{{veterinarian_id}}",
+                  "description": "Filter by veterinarian ID (required)"
+                }
+              ]
+            },
+            "description": "Get reviews for a veterinarian. Public endpoint."
+          }
+        }
+      ]
+    },
+    {
+      "name": "💬 Chat",
+      "item": [
+        {
+          "name": "Get Conversations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/chat/conversations",
+              "host": ["{{base_url}}"],
+              "path": ["chat", "conversations"]
+            },
+            "description": "Get all conversations for authenticated user."
+          }
+        },
+        {
+          "name": "Get Messages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/chat/messages/{{conversation_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["chat", "messages", "{{conversation_id}}"]
+            },
+            "description": "Get messages for a conversation."
+          }
+        },
+        {
+          "name": "Send Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationId\": \"{{conversation_id}}\",\n  \"message\": \"Hello, I have a question about my pet\",\n  \"type\": \"TEXT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/chat/send",
+              "host": ["{{base_url}}"],
+              "path": ["chat", "send"]
+            },
+            "description": "Send a message in a conversation."
+          }
+        }
+      ]
+    },
+    {
+      "name": "📹 Video Sessions",
+      "item": [
+        {
+          "name": "Create Video Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointmentId\": \"{{appointment_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/video/create",
+              "host": ["{{base_url}}"],
+              "path": ["video", "create"]
+            },
+            "description": "Create a video session for an appointment. Requires Stream.io configuration."
+          }
+        },
+        {
+          "name": "Get Video Token",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/video/token/{{appointment_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["video", "token", "{{appointment_id}}"]
+            },
+            "description": "Get video call token for an appointment."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔔 Notifications",
+      "item": [
+        {
+          "name": "Get Notifications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/notifications?unreadOnly=true",
+              "host": ["{{base_url}}"],
+              "path": ["notifications"],
+              "query": [
+                {
+                  "key": "unreadOnly",
+                  "value": "true",
+                  "description": "Filter unread notifications only (optional)"
+                }
+              ]
+            },
+            "description": "Get notifications for authenticated user."
+          }
+        },
+        {
+          "name": "Mark Notification as Read",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/notifications/{{notification_id}}/read",
+              "host": ["{{base_url}}"],
+              "path": ["notifications", "{{notification_id}}", "read"]
+            },
+            "description": "Mark a notification as read."
+          }
+        }
+      ]
+    },
+    {
+      "name": "👑 Admin",
+      "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "dashboard"]
+            },
+            "description": "Get admin dashboard with platform statistics. Admin only."
+          }
+        },
+        {
+          "name": "List All Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/users?role=PET_OWNER&status=APPROVED",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "users"],
+              "query": [
+                {
+                  "key": "role",
+                  "value": "PET_OWNER",
+                  "description": "Filter by role (optional)"
+                },
+                {
+                  "key": "status",
+                  "value": "APPROVED",
+                  "description": "Filter by status (optional)"
+                }
+              ]
+            },
+            "description": "List all users. Admin only."
+          }
+        }
+      ]
+    },
+    {
+      "name": "📤 File Upload",
+      "item": [
+        {
+          "name": "Upload Profile Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "profileImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/upload/profile",
+              "host": ["{{base_url}}"],
+              "path": ["upload", "profile"]
+            },
+            "description": "Upload profile image. Max size: 10MB. Allowed types: jpeg, jpg, png, gif."
+          }
+        },
+        {
+          "name": "Upload Pet Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "petImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/upload/pet",
+              "host": ["{{base_url}}"],
+              "path": ["upload", "pet"]
+            },
+            "description": "Upload pet image."
+          }
+        },
+        {
+          "name": "Upload Medical Record",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{pet_owner_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "medicalRecord",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "petId",
+                  "value": "{{pet_id}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/upload/medical-record",
+              "host": ["{{base_url}}"],
+              "path": ["upload", "medical-record"]
+            },
+            "description": "Upload medical record file (PDF, image, etc.)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏥 Specializations",
+      "item": [
+        {
+          "name": "List Specializations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/specializations",
+              "host": ["{{base_url}}"],
+              "path": ["specializations"]
+            },
+            "description": "List all veterinary specializations. Public endpoint."
+          }
+        },
+        {
+          "name": "Create Specialization (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Avian Medicine\",\n  \"description\": \"Specialization in bird care\",\n  \"type\": \"AVIAN\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/specializations",
+              "host": ["{{base_url}}"],
+              "path": ["specializations"]
+            },
+            "description": "Create a new specialization. Admin only."
+          }
+        }
+      ]
+    },
+    {
+      "name": "💳 Subscriptions",
+      "item": [
+        {
+          "name": "List Subscription Plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/subscription-plans",
+              "host": ["{{base_url}}"],
+              "path": ["subscription-plans"]
+            },
+            "description": "List all active subscription plans. Public endpoint."
+          }
+        },
+        {
+          "name": "Purchase Subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planId\": \"{{subscription_plan_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/subscriptions/purchase",
+              "host": ["{{base_url}}"],
+              "path": ["subscriptions", "purchase"]
+            },
+            "description": "Purchase a subscription plan. Veterinarian only."
+          }
+        },
+        {
+          "name": "Get My Subscription",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/subscriptions/my-subscription",
+              "host": ["{{base_url}}"],
+              "path": ["subscriptions", "my-subscription"]
+            },
+            "description": "Get current subscription for authenticated veterinarian."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏪 Pet Stores",
+      "item": [
+        {
+          "name": "List Pet Stores",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pet-stores",
+              "host": ["{{base_url}}"],
+              "path": ["pet-stores"]
+            },
+            "description": "List all active pet stores. Public endpoint."
+          }
+        },
+        {
+          "name": "Create Pet Store",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{veterinarian_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Pet Care Store\",\n  \"address\": {\n    \"line1\": \"123 Main St\",\n    \"city\": \"New York\",\n    \"state\": \"NY\",\n    \"zip\": \"10001\",\n    \"country\": \"USA\"\n  },\n  \"phone\": \"+1234567890\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/pet-stores",
+              "host": ["{{base_url}}"],
+              "path": ["pet-stores"]
+            },
+            "description": "Create a new pet store. Veterinarian or PET_STORE role."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔍 System Utilities",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check if the API server is running. No authentication required."
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000/api",
+      "type": "string"
+    },
+    {
+      "key": "pet_owner_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "veterinarian_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pet_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "appointment_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "veterinarian_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "order_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "product_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pet_store_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "subscription_plan_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-set token based on route",
+          "const url = pm.request.url.toString();",
+          "if (url.includes('/admin/')) {",
+          "    pm.request.headers.add({ key: 'Authorization', value: 'Bearer ' + pm.environment.get('admin_token') });",
+          "} else if (url.includes('/veterinarians/') && pm.request.method === 'GET' && !url.includes('/veterinarians/dashboard')) {",
+          "    // Public endpoint, no token needed",
+          "} else if (url.includes('/veterinarians/')) {",
+          "    pm.request.headers.add({ key: 'Authorization', value: 'Bearer ' + pm.environment.get('veterinarian_token') });",
+          "} else if (url.includes('/pet-owners/')) {",
+          "    pm.request.headers.add({ key: 'Authorization', value: 'Bearer ' + pm.environment.get('pet_owner_token') });",
+          "}"
+        ]
+      }
+    }
+  ]
+}

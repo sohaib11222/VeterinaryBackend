@@ -1,0 +1,44 @@
+{
+  "name": "veterinary-backend",
+  "version": "1.0.0",
+  "description": "Express.js backend for Veterinary/Pet Care platform with MongoDB, JWT, and Stream Video",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "seed:admin": "node src/seeders/admin.seeder.js",
+    "seed:vaccines": "node src/seeders/vaccine.seeder.js"
+  },
+  "keywords": [
+    "veterinary",
+    "pet-care",
+    "express",
+    "mongodb",
+    "jwt"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.65.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "express-rate-limit": "^8.2.1",
+    "getstream": "^8.8.0",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.3.2",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.20.2",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^7.0.12",
+    "pdfkit": "^0.16.0",
+    "socket.io": "^4.7.5",
+    "stream-chat": "^9.27.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  }
+}
