@@ -4,6 +4,12 @@ const { generateToken, generateRefreshToken } = require('../utils/jwt');
 const { USER_ROLES, USER_STATUS } = require('../types/enums');
 const { sendError } = require('../utils/response');
 const { validateObjectId } = require('../utils/validation');
+const { sendPhoneOtp, verifyPhoneOtp } = require('./twilioVerify.service');
+
+const isE164Phone = (phone) => {
+  const t = String(phone || '').trim();
+  return /^\+\d{7,15}$/.test(t);
+};
 
 /**
  * Register new user
@@ -20,24 +26,40 @@ const register = async (data) => {
     throw new Error('User with this email or phone already exists');
   }
 
-  // Determine status based on role
+  const normalizedRole = String(role || USER_ROLES.PET_OWNER).toUpperCase();
+  const isPetStore = normalizedRole === USER_ROLES.PET_STORE;
+  const isParapharmacy = normalizedRole === USER_ROLES.PARAPHARMACY;
+
   let status = USER_STATUS.APPROVED;
-  if ([USER_ROLES.VETERINARIAN, USER_ROLES.PET_STORE, USER_ROLES.PARAPHARMACY].includes(role)) {
+  if ([USER_ROLES.VETERINARIAN, USER_ROLES.PET_STORE, USER_ROLES.PARAPHARMACY].includes(normalizedRole)) {
     status = USER_STATUS.PENDING;
   }
 
-  // Create user
+  if ((isPetStore || isParapharmacy) && !isE164Phone(phone)) {
+    throw new Error('Phone number must be in international format (E.164), e.g. +1234567890');
+  }
+
   const user = await User.create({
     name,
     email,
-    phone,
+    phone: phone ? String(phone).trim() : phone,
     password,
-    role: role || USER_ROLES.PET_OWNER,
-    status
+    role: normalizedRole,
+    status,
+    isPhoneVerified: false,
   });
 
+  if (isPetStore || isParapharmacy) {
+    try {
+      await sendPhoneOtp(String(user.phone).trim());
+    } catch (error) {
+      await User.deleteOne({ _id: user._id });
+      throw new Error(error?.message || 'Failed to send verification code');
+    }
+  }
+
   // Create veterinarian profile if role is VETERINARIAN
-  if (role === USER_ROLES.VETERINARIAN) {
+  if (normalizedRole === USER_ROLES.VETERINARIAN) {
     const veterinarianProfile = await VeterinarianProfile.create({
       userId: user._id
     });
@@ -64,10 +86,81 @@ const register = async (data) => {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      status: user.status
+      status: user.status,
+      isPhoneVerified: user.isPhoneVerified,
     },
     token,
     refreshToken
+  };
+};
+
+const sendPhoneOtpForUser = async (userId, phone = null) => {
+  validateObjectId(userId, 'User ID');
+  const user = await User.findById(userId).maxTimeMS(2000);
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  if (![USER_ROLES.PET_STORE, USER_ROLES.PARAPHARMACY].includes(user.role)) {
+    throw new Error('Phone verification is only available for pharmacy accounts');
+  }
+
+  const targetPhone = String(phone || user.phone || '').trim();
+  if (!isE164Phone(targetPhone)) {
+    throw new Error('Phone number must be in international format (E.164), e.g. +1234567890');
+  }
+
+  if (!user.phone || String(user.phone).trim() !== targetPhone) {
+    user.phone = targetPhone;
+    await user.save();
+  }
+
+  const result = await sendPhoneOtp(targetPhone);
+  return { status: result.status };
+};
+
+const verifyPhoneOtpForUser = async (userId, code, phone = null) => {
+  validateObjectId(userId, 'User ID');
+  const user = await User.findById(userId).maxTimeMS(2000);
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  if (![USER_ROLES.PET_STORE, USER_ROLES.PARAPHARMACY].includes(user.role)) {
+    throw new Error('Phone verification is only available for pharmacy accounts');
+  }
+
+  const targetPhone = String(phone || user.phone || '').trim();
+  if (!isE164Phone(targetPhone)) {
+    throw new Error('Phone number must be in international format (E.164), e.g. +1234567890');
+  }
+  if (!String(code || '').trim()) {
+    throw new Error('Verification code is required');
+  }
+
+  const result = await verifyPhoneOtp(targetPhone, String(code).trim());
+  const isApproved = String(result.status || '').toLowerCase() === 'approved';
+  if (!isApproved) {
+    throw new Error('Invalid verification code');
+  }
+
+  user.isPhoneVerified = true;
+  user.phone = targetPhone;
+  await user.save();
+
+  return {
+    verified: true,
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      status: user.status,
+      isPhoneVerified: user.isPhoneVerified,
+    },
   };
 };
 
@@ -158,7 +251,8 @@ const login = async (data) => {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      status: user.status
+      status: user.status,
+      isPhoneVerified: user.isPhoneVerified,
     },
     token,
     refreshToken
@@ -300,5 +394,7 @@ module.exports = {
   approveVeterinarian,
   rejectVeterinarian,
   approvePetStoreUser,
-  rejectPetStoreUser
+  rejectPetStoreUser,
+  sendPhoneOtpForUser,
+  verifyPhoneOtpForUser
 };

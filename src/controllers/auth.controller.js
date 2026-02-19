@@ -89,3 +89,15 @@ exports.rejectPetStore = asyncHandler(async (req, res) => {
   await authService.rejectPetStoreUser(id, req.body.reason);
   return sendSuccess(res, 'Pet store rejected');
 });
+
+exports.sendPhoneOtp = asyncHandler(async (req, res) => {
+  const { phone } = req.body || {};
+  const result = await authService.sendPhoneOtpForUser(req.userId, phone);
+  return sendSuccess(res, 'OK', result);
+});
+
+exports.verifyPhoneOtp = asyncHandler(async (req, res) => {
+  const { code, phone } = req.body || {};
+  const result = await authService.verifyPhoneOtpForUser(req.userId, code, phone);
+  return sendSuccess(res, 'OK', result);
+});
