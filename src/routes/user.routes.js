@@ -55,6 +55,17 @@ router.get(
 );
 
 /**
+ * @route   DELETE /api/users/:id
+ * @desc    Delete user (admin only)
+ * @access  Private (ADMIN)
+ */
+router.delete(
+  '/:id',
+  authGuard(['ADMIN']),
+  asyncHandler(userController.deleteUser)
+);
+
+/**
  * @route   GET /api/users/:id
  * @desc    Get user by ID
  * @access  Private

@@ -46,3 +46,11 @@ exports.listVeterinarians = asyncHandler(async (req, res) => {
   const result = await userService.listVeterinarians(req.query);
   return sendSuccess(res, 'OK', result);
 });
+
+/**
+ * Delete user by ID (admin only)
+ */
+exports.deleteUser = asyncHandler(async (req, res) => {
+  const result = await userService.deleteUserById(req.params.id);
+  return sendSuccess(res, 'User deleted successfully', result);
+});

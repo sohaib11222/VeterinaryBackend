@@ -1,4 +1,13 @@
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+
+const envPath = path.resolve(__dirname, '../../.env');
+if (fs.existsSync(envPath)) {
+  require('dotenv').config({
+    path: envPath,
+    override: false,
+  });
+}
 const mongoose = require('mongoose');
 const User = require('../models/User');
 
@@ -9,14 +18,32 @@ const ADMIN_NAME = process.env.ADMIN_NAME || 'Admin User';
 const MONGODB_URI =
   process.env.MONGO_URI ||
   process.env.MONGODB_URI ||
-  'mongodb://localhost:27017/veterinary_db';
+  null;
 
 async function seedAdmin() {
   try {
     console.log('🌱 Starting Admin Seeder...\n');
 
+    if (fs.existsSync(envPath)) {
+      console.log(`🧩 Loaded env file: ${envPath}`);
+    } else {
+      console.log('🧩 No .env file found at backend root (skipping dotenv file load)');
+    }
+
+    if (!MONGODB_URI) {
+      throw new Error('Missing MONGO_URI (or MONGODB_URI). Refusing to seed to avoid writing to the wrong database.');
+    }
+
+    const sanitizedUri = String(MONGODB_URI)
+      .replace(/:\/\/.*?:.*?@/, '://***:***@')
+      .replace(/\?.*$/, '');
+    console.log(`🔎 Using MONGO_URI: ${sanitizedUri}`);
+
     console.log('📡 Connecting to MongoDB...');
     await mongoose.connect(MONGODB_URI);
+    console.log(
+      `🔗 Mongo Target: host=${mongoose.connection.host} db=${mongoose.connection.name}`
+    );
     console.log('✅ Connected to MongoDB\n');
 
     console.log('🔍 Checking if admin user exists...');
@@ -56,11 +83,9 @@ async function seedAdmin() {
     console.log('🎭 Role:', admin.role);
     console.log('📊 Status:', admin.status);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-    process.exit(0);
   } catch (error) {
     console.error('\n❌ Error seeding admin:', error.message);
-    process.exit(1);
+    throw error;
   } finally {
     await mongoose.disconnect();
     console.log('📡 Disconnected from MongoDB');

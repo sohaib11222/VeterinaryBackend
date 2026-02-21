@@ -129,11 +129,16 @@ const listPetStores = async (filter = {}) => {
     city,
     kind,
     search,
+    includeInactive,
     page = 1,
     limit = 10
   } = filter;
 
-  const query = { isActive: true };
+  const query = {};
+  const includeAll = String(includeInactive || '').toLowerCase() === 'true';
+  if (!includeAll) {
+    query.isActive = true;
+  }
 
   if (ownerId) {
     // Handle both single ownerId and $in operator for multiple ownerIds

@@ -236,10 +236,34 @@ const listVeterinarians = async (filter = {}) => {
   };
 };
 
+/**
+ * Delete user by ID (admin only)
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} Success message
+ */
+const deleteUserById = async (userId) => {
+  validateObjectId(userId, 'User ID');
+
+  const user = await User.findById(userId)
+    .maxTimeMS(2000);
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  if (String(user.role || '').toUpperCase() === 'ADMIN') {
+    throw new Error('Cannot delete admin user');
+  }
+
+  await User.findByIdAndDelete(userId).maxTimeMS(2000);
+  return { message: 'User deleted successfully' };
+};
+
 module.exports = {
   getUserById,
   updateUserProfile,
   updateStatus,
   listUsers,
-  listVeterinarians
+  listVeterinarians,
+  deleteUserById
 };
