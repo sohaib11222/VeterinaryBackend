@@ -252,7 +252,7 @@ const requestWithdrawal = async (userId, amount, paymentDetails = {}) => {
  */
 const approveWithdrawal = async (requestId, adminId, withdrawalFeePercent = null) => {
   const request = await WithdrawalRequest.findById(requestId)
-    .populate('userId', 'balance name email fullName');
+    .populate('userId', 'balance name email fullName role');
   
   if (!request) {
     throw new Error('Withdrawal request not found');
@@ -398,7 +398,7 @@ const getWithdrawalRequests = async (filter = {}) => {
 
   const [requests, total] = await Promise.all([
     WithdrawalRequest.find(query)
-      .populate('userId', 'name email balance fullName')
+      .populate('userId', 'name email balance fullName role')
       .populate('approvedBy', 'name email fullName')
       .sort({ createdAt: -1 })
       .skip(skip)
