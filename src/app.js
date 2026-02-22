@@ -28,12 +28,23 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 // Request logging
 app.use(requestLogger);
 
+const uploadsDir = path.join(__dirname, "..", "uploads");
+
 // Serve static files from uploads directory
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads"), {
+app.use("/uploads", express.static(uploadsDir, {
   setHeaders: (res, path) => {
     // Set proper headers for image files
     if (path.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) {
       res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+  }
+}));
+
+app.use("/api/uploads", express.static(uploadsDir, {
+  setHeaders: (res, path) => {
+    if (path.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     }
   }
