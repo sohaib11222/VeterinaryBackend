@@ -29,7 +29,15 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(requestLogger);
 
 // Serve static files from uploads directory
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads"), {
+  setHeaders: (res, path) => {
+    // Set proper headers for image files
+    if (path.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+  }
+}));
 
 // Mount all API routes
 app.use("/api", routes);
