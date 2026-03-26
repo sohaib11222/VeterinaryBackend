@@ -11,16 +11,75 @@ const subscriptionPolicy = require('./subscriptionPolicy.service');
  */
 const isWithinAppointmentWindow = (appointment) => {
   const now = new Date();
-  const appointmentDate = new Date(appointment.appointmentDate);
-  const [hours, minutes] = appointment.appointmentTime.split(':').map(Number);
-  appointmentDate.setHours(hours, minutes, 0, 0);
 
-  const endTime = new Date(appointmentDate);
-  endTime.setMinutes(endTime.getMinutes() + (appointment.appointmentDuration || 30));
+  const appointmentDateUTC = appointment.appointmentDate instanceof Date
+    ? appointment.appointmentDate
+    : new Date(appointment.appointmentDate);
 
-  // Allow 15 minutes before and 30 minutes after
-  const windowStart = new Date(appointmentDate.getTime() - 15 * 60 * 1000);
-  const windowEnd = new Date(endTime.getTime() + 30 * 60 * 1000);
+  const baseYear = appointmentDateUTC.getUTCFullYear();
+  const baseMonth = appointmentDateUTC.getUTCMonth() + 1;
+  const baseDay = appointmentDateUTC.getUTCDate();
+
+  const [startHours, startMinutes] = String(appointment.appointmentTime || '').split(':').map(Number);
+  if (!Number.isFinite(startHours) || !Number.isFinite(startMinutes)) {
+    return { isValid: false, message: 'Invalid appointment time' };
+  }
+
+  const duration = appointment.appointmentDuration || 30;
+  const tzOffsetMinutes =
+    typeof appointment.timezoneOffset === 'number' && Number.isFinite(appointment.timezoneOffset)
+      ? appointment.timezoneOffset
+      : null;
+
+  let start;
+  if (tzOffsetMinutes !== null) {
+    const appointmentDateInTz = new Date(appointmentDateUTC.getTime() + tzOffsetMinutes * 60 * 1000);
+    const year = appointmentDateInTz.getUTCFullYear();
+    const month = appointmentDateInTz.getUTCMonth();
+    const day = appointmentDateInTz.getUTCDate();
+    const appointmentStartDateTimeUTC = new Date(Date.UTC(year, month, day, startHours, startMinutes, 0, 0));
+    start = new Date(appointmentStartDateTimeUTC.getTime() - tzOffsetMinutes * 60 * 1000);
+  } else {
+    start = new Date(Date.UTC(baseYear, baseMonth - 1, baseDay, startHours, startMinutes, 0, 0));
+  }
+
+  let end;
+  if (appointment.appointmentEndTime) {
+    const [endHours, endMinutes] = String(appointment.appointmentEndTime || '').split(':').map(Number);
+    if (Number.isFinite(endHours) && Number.isFinite(endMinutes)) {
+      const startTimeMinutes = startHours * 60 + startMinutes;
+      const endTimeMinutes = endHours * 60 + endMinutes;
+
+      let endYear = baseYear;
+      let endMonth = baseMonth - 1;
+      let endDay = baseDay;
+
+      if (tzOffsetMinutes !== null) {
+        const appointmentDateInTz = new Date(appointmentDateUTC.getTime() + tzOffsetMinutes * 60 * 1000);
+        endYear = appointmentDateInTz.getUTCFullYear();
+        endMonth = appointmentDateInTz.getUTCMonth();
+        endDay = appointmentDateInTz.getUTCDate();
+      }
+
+      if (endTimeMinutes < startTimeMinutes && startTimeMinutes - endTimeMinutes > 12 * 60) {
+        const nextDay = new Date(Date.UTC(endYear, endMonth, endDay + 1));
+        endYear = nextDay.getUTCFullYear();
+        endMonth = nextDay.getUTCMonth();
+        endDay = nextDay.getUTCDate();
+      }
+
+      const appointmentEndDateTimeUTC = new Date(Date.UTC(endYear, endMonth, endDay, endHours, endMinutes, 0, 0));
+      end = tzOffsetMinutes !== null
+        ? new Date(appointmentEndDateTimeUTC.getTime() - tzOffsetMinutes * 60 * 1000)
+        : appointmentEndDateTimeUTC;
+    }
+  }
+  if (!end) {
+    end = new Date(start.getTime() + duration * 60 * 1000);
+  }
+
+  const windowStart = new Date(start.getTime() - 15 * 60 * 1000);
+  const windowEnd = new Date(end.getTime() + 30 * 60 * 1000);
 
   if (now < windowStart) {
     return { isValid: false, message: 'Communication will be available 15 minutes before the appointment time' };

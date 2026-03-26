@@ -113,7 +113,7 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
  */
 const getOrderById = async (orderId, userId, userRole) => {
   const order = await Order.findById(orderId)
-    .select('petOwnerId petStoreId ownerId items transactionId status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt')
+    .select('petOwnerId petStoreId ownerId items transactionId status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt shippingAddress notes')
     .lean()
     .maxTimeMS(2000);
 

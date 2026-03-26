@@ -105,7 +105,7 @@ const uploadMultipleImages = (folderName, maxCount = 10) => {
     storage,
     fileFilter,
     limits: {
-      fileSize: 10 * 1024 * 1024, // 10MB per file (verification docs can be larger)
+      fileSize: 25 * 1024 * 1024, // 25MB per file (verification docs can be larger)
       files: maxCount
     }
   });
@@ -121,7 +121,7 @@ const uploadMultipleImages = (folderName, maxCount = 10) => {
               res,
               'File too large',
               HTTP_STATUS.BAD_REQUEST,
-              [{ message: 'Each file size must be less than 5MB' }],
+              [{ message: 'Each file size must be less than 25MB' }],
             );
           }
           if (err.code === 'LIMIT_FILE_COUNT') {

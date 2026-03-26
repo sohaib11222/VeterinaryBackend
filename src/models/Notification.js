@@ -16,7 +16,19 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['APPOINTMENT', 'PAYMENT', 'SYSTEM', 'SUBSCRIPTION', 'CHAT', 'VACCINATION', 'WEIGHT', 'OTHER'],
+    enum: [
+      'APPOINTMENT',
+      'PAYMENT',
+      'SYSTEM',
+      'SUBSCRIPTION',
+      'CHAT',
+      'VACCINATION',
+      'WEIGHT',
+      'RESCHEDULE_REQUEST',
+      'RESCHEDULE_APPROVED',
+      'RESCHEDULE_REJECTED',
+      'OTHER',
+    ],
     default: 'OTHER'
   },
   data: {

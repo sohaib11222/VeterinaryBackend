@@ -15,6 +15,7 @@ if (config.STREAM_API_KEY && config.STREAM_API_SECRET) {
       config.STREAM_API_SECRET
     );
     console.log('✅ Stream client initialized successfully');
+    console.log(`✅ Stream API key in use: ${config.STREAM_API_KEY}`);
   } catch (error) {
     console.error('❌ Failed to initialize Stream client:', error);
   }
@@ -32,7 +33,9 @@ const generateUserToken = (userId, userName) => {
     const token = streamClient.createToken(userId);
     return token;
   } catch (error) {
-    throw new Error(`Failed to generate Stream token: ${error.message}`);
+    throw new Error(
+      `Failed to generate Stream token (apiKey=${config.STREAM_API_KEY || 'missing'}): ${error.message}`
+    );
   }
 };
 
