@@ -88,7 +88,9 @@ const userSchema = new mongoose.Schema({
   documentUploads: {
     type: [{
       fileUrl: { type: String, default: null },
-      type: { type: String, default: null }
+      type: { type: String, default: null },
+      originalName: { type: String, default: null },
+      uploadedAt: { type: Date, default: Date.now }
     }],
     default: null
   },

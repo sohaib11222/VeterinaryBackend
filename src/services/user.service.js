@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const VeterinarianSubscription = require('../models/VeterinarianSubscription');
 const { validateObjectId } = require('../utils/validation');
 
 /**
@@ -193,32 +194,52 @@ const listVeterinarians = async (filter = {}) => {
     User.countDocuments(query)
   ]);
 
-  // Filter by subscription status if provided
-  let filteredVeterinarians = veterinarians;
-  if (subscriptionStatus) {
-    const VeterinarianSubscription = require('../models/VeterinarianSubscription');
-    const now = new Date();
-    
-    const subscriptionMap = new Map();
-    const veterinarianIds = veterinarians.map(v => v._id);
-    const activeSubscriptions = await VeterinarianSubscription.find({
+  const veterinarianIds = veterinarians.map(v => v._id);
+  const activeSubscriptions = veterinarianIds.length > 0
+    ? await VeterinarianSubscription.find({
       veterinarianId: { $in: veterinarianIds },
       isActive: true,
-      endDate: { $gt: now }
-    });
-    
-    activeSubscriptions.forEach(sub => {
-      subscriptionMap.set(sub.veterinarianId.toString(), sub);
-    });
-    
-    filteredVeterinarians = veterinarians.filter(vet => {
-      const hasActiveSubscription = subscriptionMap.has(vet._id.toString());
-      
-      if (subscriptionStatus.toUpperCase() === 'ACTIVE') {
-        return hasActiveSubscription;
-      } else if (subscriptionStatus.toUpperCase() === 'EXPIRED') {
-        return !hasActiveSubscription;
-      } else if (subscriptionStatus.toUpperCase() === 'NONE') {
+      endDate: { $gt: new Date() }
+    })
+      .populate('subscriptionPlanId', 'name price durationInDays features status')
+      .lean()
+      .maxTimeMS(3000)
+    : [];
+
+  const subscriptionMap = new Map(
+    activeSubscriptions.map(subscription => [
+      subscription.veterinarianId.toString(),
+      subscription
+    ])
+  );
+
+  // Always return subscription information so it can be reviewed in the
+  // Admin UI, not merely used as an invisible filter.
+  const enrichedVeterinarians = veterinarians.map(veterinarian => {
+    const vet = veterinarian.toObject();
+    const subscription = subscriptionMap.get(vet._id.toString()) || null;
+    return {
+      ...vet,
+      subscriptionStatus: subscription ? 'ACTIVE' : 'NONE',
+      subscription: subscription
+        ? {
+          _id: subscription._id,
+          startDate: subscription.startDate,
+          endDate: subscription.endDate,
+          isActive: subscription.isActive,
+          plan: subscription.subscriptionPlanId || null
+        }
+        : null
+    };
+  });
+
+  let filteredVeterinarians = enrichedVeterinarians;
+  if (subscriptionStatus) {
+    const requestedStatus = subscriptionStatus.toUpperCase();
+    filteredVeterinarians = enrichedVeterinarians.filter(vet => {
+      const hasActiveSubscription = vet.subscriptionStatus === 'ACTIVE';
+      if (requestedStatus === 'ACTIVE') return hasActiveSubscription;
+      if (requestedStatus === 'EXPIRED' || requestedStatus === 'NONE') {
         return !hasActiveSubscription;
       }
       return true;

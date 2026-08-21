@@ -14,6 +14,11 @@ router.use(requireRole('ADMIN'));
 router.get('/dashboard', asyncHandler(adminController.getDashboard));
 
 /**
+ * Sidebar notification markers and pending-work counts
+ */
+router.get('/sidebar-indicators', asyncHandler(adminController.getSidebarIndicators));
+
+/**
  * Get all users
  */
 router.get('/users', asyncHandler(adminController.getUsers));

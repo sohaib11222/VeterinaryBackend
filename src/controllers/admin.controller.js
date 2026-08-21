@@ -11,6 +11,14 @@ exports.getDashboard = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Get compact sidebar change markers (Admin only)
+ */
+exports.getSidebarIndicators = asyncHandler(async (req, res) => {
+  const result = await adminService.getSidebarIndicators();
+  return sendSuccess(res, 'OK', result);
+});
+
+/**
  * Get all users
  */
 exports.getUsers = asyncHandler(async (req, res) => {

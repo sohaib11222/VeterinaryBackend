@@ -75,10 +75,16 @@ exports.uploadMultipleFiles = asyncHandler(async (req, res) => {
     try {
       const user = await User.findById(req.userId);
       if (user && user.role === 'VETERINARIAN') {
-        // Create document uploads array
-        const documentUploads = urls.map(url => ({
+        const suppliedTypes = Array.isArray(req.body?.documentType)
+          ? req.body.documentType
+          : req.body?.documentType
+            ? [req.body.documentType]
+            : [];
+        const documentUploads = urls.map((url, index) => ({
           fileUrl: url,
-          type: 'VERIFICATION_DOCUMENT' // Default type for verification documents
+          type: suppliedTypes[index] || 'VERIFICATION_DOCUMENT',
+          originalName: req.files[index]?.originalname || null,
+          uploadedAt: new Date()
         }));
 
         // Update user's documentUploads field
@@ -104,9 +110,11 @@ exports.uploadMultipleFiles = asyncHandler(async (req, res) => {
       const role = String(user?.role || '').toUpperCase();
       if (user && (role === 'PET_STORE' || role === 'PARAPHARMACY')) {
         const docType = String(req.body?.docType || '').trim() || null;
-        const documentUploads = urls.map((url) => ({
+        const documentUploads = urls.map((url, index) => ({
           fileUrl: url,
           type: docType,
+          originalName: req.files[index]?.originalname || null,
+          uploadedAt: new Date(),
         }));
 
         if (user.documentUploads && Array.isArray(user.documentUploads)) {

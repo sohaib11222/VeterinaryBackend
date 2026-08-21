@@ -6,6 +6,15 @@ const Review = require('../models/Review');
 const VeterinarianSubscription = require('../models/VeterinarianSubscription');
 const Pet = require('../models/Pet');
 const MedicalRecord = require('../models/MedicalRecord');
+const PetStore = require('../models/PetStore');
+const Product = require('../models/Product');
+const Order = require('../models/Order');
+const WithdrawalRequest = require('../models/WithdrawalRequest');
+const SubscriptionPlan = require('../models/SubscriptionPlan');
+const Announcement = require('../models/Announcement');
+const InsuranceCompany = require('../models/InsuranceCompany');
+const Specialization = require('../models/Specialization');
+const Vaccine = require('../models/Vaccine');
 
 /**
  * Get dashboard statistics
@@ -54,6 +63,108 @@ const getDashboardStats = async () => {
     veterinariansPendingApproval,
     activeSubscriptionsCount,
     todaysAppointmentsCount
+  };
+};
+
+/**
+ * Return compact, admin-only change markers for the sidebar.
+ *
+ * The client records when an individual admin has visited each section. That
+ * lets it show a blue dot for records created since that visit, while pending
+ * approval/workflow items remain red until they are acted on.
+ */
+const getSidebarIndicators = async () => {
+  const latestCreatedAt = async (Model, query = {}) => {
+    const latest = await Model.findOne(query)
+      .select('createdAt')
+      .sort({ createdAt: -1 })
+      .lean()
+      .maxTimeMS(2000);
+
+    return latest?.createdAt || null;
+  };
+
+  const petStoreRoles = { $in: ['PET_STORE', 'PARAPHARMACY'] };
+  const [
+    allUsers,
+    veterinarians,
+    pendingVeterinarians,
+    pendingPetStores,
+    pets,
+    medicalRecords,
+    vaccines,
+    appointments,
+    petStores,
+    products,
+    orders,
+    transactions,
+    withdrawals,
+    subscriptions,
+    subscriptionPlans,
+    announcements,
+    reviews,
+    insuranceCompanies,
+    specializations,
+    pendingVeterinarianCount,
+    pendingPetStoreCount,
+    pendingWithdrawalCount,
+  ] = await Promise.all([
+    latestCreatedAt(User),
+    latestCreatedAt(User, { role: 'VETERINARIAN' }),
+    latestCreatedAt(User, { role: 'VETERINARIAN', status: 'PENDING' }),
+    latestCreatedAt(User, { role: petStoreRoles, status: 'PENDING' }),
+    latestCreatedAt(Pet),
+    latestCreatedAt(MedicalRecord),
+    latestCreatedAt(Vaccine),
+    latestCreatedAt(Appointment),
+    latestCreatedAt(PetStore),
+    latestCreatedAt(Product),
+    latestCreatedAt(Order),
+    latestCreatedAt(Transaction),
+    latestCreatedAt(WithdrawalRequest),
+    latestCreatedAt(VeterinarianSubscription),
+    latestCreatedAt(SubscriptionPlan),
+    latestCreatedAt(Announcement),
+    latestCreatedAt(Review),
+    latestCreatedAt(InsuranceCompany),
+    latestCreatedAt(Specialization),
+    User.countDocuments({ role: 'VETERINARIAN', status: 'PENDING' }).maxTimeMS(2000),
+    User.countDocuments({ role: petStoreRoles, status: 'PENDING' }).maxTimeMS(2000),
+    WithdrawalRequest.countDocuments({ status: 'PENDING' }).maxTimeMS(2000),
+  ]);
+
+  return {
+    generatedAt: new Date(),
+    sections: {
+      users: { latestAt: allUsers },
+      veterinarians: { latestAt: veterinarians },
+      veterinarianApprovals: {
+        latestAt: pendingVeterinarians,
+        pendingCount: pendingVeterinarianCount,
+      },
+      petStoreApprovals: {
+        latestAt: pendingPetStores,
+        pendingCount: pendingPetStoreCount,
+      },
+      pets: { latestAt: pets },
+      medicalRecords: { latestAt: medicalRecords },
+      vaccines: { latestAt: vaccines },
+      appointments: { latestAt: appointments },
+      petStores: { latestAt: petStores },
+      products: { latestAt: products },
+      orders: { latestAt: orders },
+      transactions: { latestAt: transactions },
+      withdrawals: {
+        latestAt: withdrawals,
+        pendingCount: pendingWithdrawalCount,
+      },
+      subscriptions: { latestAt: subscriptions },
+      subscriptionPlans: { latestAt: subscriptionPlans },
+      announcements: { latestAt: announcements },
+      reviews: { latestAt: reviews },
+      insuranceCompanies: { latestAt: insuranceCompanies },
+      specializations: { latestAt: specializations },
+    },
   };
 };
 
@@ -505,6 +616,7 @@ const getSystemActivity = async (options = {}) => {
 
 module.exports = {
   getDashboardStats,
+  getSidebarIndicators,
   getUsers,
   getAllTransactions,
   getAllReviews,
