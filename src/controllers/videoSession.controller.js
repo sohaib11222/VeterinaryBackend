@@ -6,7 +6,7 @@ const { sendSuccess } = require('../utils/response');
  * Start video session
  */
 exports.startSession = asyncHandler(async (req, res) => {
-  const { appointmentId } = req.body;
+  const { appointmentId, restartActive = false } = req.body;
   const userId = req.userId;
   const userName = req.user?.name || req.user?.email || 'User';
   
@@ -20,7 +20,8 @@ exports.startSession = asyncHandler(async (req, res) => {
   const result = await videoSessionService.startSession(
     appointmentId,
     userId,
-    userName
+    userName,
+    { restartActive: restartActive === true }
   );
   
   return sendSuccess(res, 'Video session started', {

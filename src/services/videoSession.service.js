@@ -160,7 +160,7 @@ const getStreamCredentials = (session, userId, userName) => ({
   streamCallId: session.sessionId || session.callId,
 });
 
-const startSession = async (appointmentId, userId, userName) => {
+const startSession = async (appointmentId, userId, userName, { restartActive = false } = {}) => {
   const { appointment, veterinarianId, petOwnerId, currentUserId } = await loadAppointmentForParticipant(appointmentId, userId);
   assertAppointmentWindow(appointment);
 
@@ -172,7 +172,26 @@ const startSession = async (appointmentId, userId, userName) => {
     return getStreamCredentials(session, userId, userName);
   }
   if (session?.status === 'ACTIVE') {
-    throw createHttpError('This appointment call is already active');
+    // A browser can be closed or refreshed before its final /end request
+    // reaches us.  In that case the database would otherwise keep the
+    // appointment permanently locked as ACTIVE.  A deliberate retry from the
+    // appointment screen is allowed to close that stale call and begin a new
+    // ringing attempt, as long as the appointment window is still valid.
+    if (!restartActive) {
+      throw createHttpError('This appointment call is already active', 409);
+    }
+
+    session.status = 'ENDED';
+    session.endedAt = new Date();
+    session.endedBy = userId;
+    session.duration = session.startedAt ? Math.floor((session.endedAt - session.startedAt) / 1000) : 0;
+    await session.save();
+
+    try {
+      if (session.callId) await streamService.endCall(session.callId);
+    } catch (error) {
+      console.error('Error closing stale Stream call:', error);
+    }
   }
 
   const streamCallId = `appointment-${appointmentId}-${Date.now()}`;
@@ -236,6 +255,11 @@ const endSession = async (sessionId, userId) => {
     session.status = getId(session.initiatedBy) === currentUserId ? 'MISSED' : 'DECLINED';
   } else if (session.status === 'ACTIVE') {
     session.status = 'ENDED';
+  } else {
+    // End is intentionally idempotent.  The client calls it both from the
+    // End Call control and as a best-effort safeguard when the call room is
+    // closed or refreshed.
+    return session;
   }
   session.endedAt = new Date();
   session.endedBy = userId;
