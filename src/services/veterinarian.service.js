@@ -14,6 +14,22 @@ const mongoose = require('mongoose');
 const { VETERINARY_SPECIALIZATION } = require('../types/enums');
 const { validateObjectId } = require('../utils/validation');
 
+const hasText = (value) => typeof value === 'string' && value.trim().length > 0;
+
+/**
+ * Keep onboarding based on the actual profile data instead of trusting an
+ * old persisted boolean. Existing veterinarian profiles may have been saved
+ * before profileCompleted was introduced or recalculated.
+ */
+const isVeterinarianProfileComplete = (profile) => Boolean(
+  profile &&
+  hasText(profile.title) &&
+  hasText(profile.biography) &&
+  Array.isArray(profile.specializations) && profile.specializations.length > 0 &&
+  Array.isArray(profile.clinics) && profile.clinics.length > 0 &&
+  Array.isArray(profile.services) && profile.services.some((service) => hasText(service?.name))
+);
+
 /**
  * Upsert veterinarian profile
  */
@@ -104,14 +120,7 @@ const upsertVeterinarianProfile = async (userId, profileData) => {
   }
 
   // Calculate profileCompleted flag
-  const isProfileCompleted = !!(
-    profile.title &&
-    profile.biography &&
-    profile.specializations && profile.specializations.length > 0 &&
-    profile.clinics && profile.clinics.length > 0 &&
-    profile.services && profile.services.length > 0 &&
-    Array.isArray(profile.services) && typeof profile.services[0] === 'object'
-  );
+  const isProfileCompleted = isVeterinarianProfileComplete(profile);
   
   profile.profileCompleted = isProfileCompleted;
   await profile.save();
@@ -535,6 +544,16 @@ const getVeterinarianDashboard = async (veterinarianId) => {
     if (profile.consultationFees && (profile.consultationFees.clinic || profile.consultationFees.online)) profileStrength += 10;
   }
 
+  // Reconcile legacy profileCompleted values on every dashboard request so a
+  // fully completed doctor account stops seeing the onboarding modal.
+  const profileCompleted = isVeterinarianProfileComplete(profile);
+  if (profile && profile.profileCompleted !== profileCompleted) {
+    await VeterinarianProfile.updateOne(
+      { _id: profile._id },
+      { $set: { profileCompleted } }
+    ).maxTimeMS(2000);
+  }
+
   // Subscription status
   const subscription = await VeterinarianSubscription.findOne({
     veterinarianId,
@@ -579,7 +598,7 @@ const getVeterinarianDashboard = async (veterinarianId) => {
     unreadMessagesCount,
     unreadNotificationsCount,
     profileStrength: Math.min(profileStrength, 100),
-    profileCompleted: profile ? profile.profileCompleted || false : false,
+    profileCompleted,
     subscription: {
       plan: subscriptionPlan,
       expiresAt: subscription ? subscription.endDate : null,
