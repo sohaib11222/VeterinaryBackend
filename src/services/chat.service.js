@@ -6,15 +6,61 @@ const Notification = require('../models/Notification');
 const mongoose = require('mongoose');
 const subscriptionPolicy = require('./subscriptionPolicy.service');
 
-/**
- * Check if current time is within appointment window
- */
-const isWithinAppointmentWindow = (appointment) => {
-  const now = new Date();
+const getTimeZoneOffsetMinutes = (date, timeZone) => {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(date).reduce((result, part) => {
+      if (part.type !== 'literal') result[part.type] = part.value;
+      return result;
+    }, {});
 
+    return (Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second)
+    ) - date.getTime()) / 60000;
+  } catch {
+    return null;
+  }
+};
+
+const zonedDateTimeToUtcMs = ({ year, month, day, hour, minute }, timeZone) => {
+  const guess = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  const initialOffset = getTimeZoneOffsetMinutes(new Date(guess), timeZone);
+  if (!Number.isFinite(initialOffset)) return guess;
+
+  let utcMs = guess - initialOffset * 60 * 1000;
+  const adjustedOffset = getTimeZoneOffsetMinutes(new Date(utcMs), timeZone);
+  if (Number.isFinite(adjustedOffset) && adjustedOffset !== initialOffset) {
+    utcMs = guess - adjustedOffset * 60 * 1000;
+  }
+  return utcMs;
+};
+
+/**
+ * Build the UTC start date/time for an appointment.  appointmentDate is stored
+ * separately from appointmentTime, so its recorded timezone must be taken into
+ * account. This matches the appointment's video-session time conversion.
+ */
+const getAppointmentStart = (appointment) => {
   const appointmentDateUTC = appointment.appointmentDate instanceof Date
     ? appointment.appointmentDate
     : new Date(appointment.appointmentDate);
+
+  if (Number.isNaN(appointmentDateUTC.getTime())) {
+    throw new Error('Invalid appointment date');
+  }
 
   const baseYear = appointmentDateUTC.getUTCFullYear();
   const baseMonth = appointmentDateUTC.getUTCMonth() + 1;
@@ -22,74 +68,149 @@ const isWithinAppointmentWindow = (appointment) => {
 
   const [startHours, startMinutes] = String(appointment.appointmentTime || '').split(':').map(Number);
   if (!Number.isFinite(startHours) || !Number.isFinite(startMinutes)) {
-    return { isValid: false, message: 'Invalid appointment time' };
+    throw new Error('Invalid appointment time');
   }
 
-  const duration = appointment.appointmentDuration || 30;
   const tzOffsetMinutes =
     typeof appointment.timezoneOffset === 'number' && Number.isFinite(appointment.timezoneOffset)
       ? appointment.timezoneOffset
       : null;
 
-  let start;
   if (tzOffsetMinutes !== null) {
     const appointmentDateInTz = new Date(appointmentDateUTC.getTime() + tzOffsetMinutes * 60 * 1000);
     const year = appointmentDateInTz.getUTCFullYear();
     const month = appointmentDateInTz.getUTCMonth();
     const day = appointmentDateInTz.getUTCDate();
     const appointmentStartDateTimeUTC = new Date(Date.UTC(year, month, day, startHours, startMinutes, 0, 0));
-    start = new Date(appointmentStartDateTimeUTC.getTime() - tzOffsetMinutes * 60 * 1000);
-  } else {
-    start = new Date(Date.UTC(baseYear, baseMonth - 1, baseDay, startHours, startMinutes, 0, 0));
+    return new Date(appointmentStartDateTimeUTC.getTime() - tzOffsetMinutes * 60 * 1000);
   }
 
-  let end;
-  if (appointment.appointmentEndTime) {
-    const [endHours, endMinutes] = String(appointment.appointmentEndTime || '').split(':').map(Number);
-    if (Number.isFinite(endHours) && Number.isFinite(endMinutes)) {
-      const startTimeMinutes = startHours * 60 + startMinutes;
-      const endTimeMinutes = endHours * 60 + endMinutes;
+  const rawTimeZone = typeof appointment.timezone === 'string' ? appointment.timezone : null;
+  const timeZone = rawTimeZone && rawTimeZone.includes('/') ? rawTimeZone : 'Europe/Rome';
+  return new Date(zonedDateTimeToUtcMs(
+    { year: baseYear, month: baseMonth, day: baseDay, hour: startHours, minute: startMinutes },
+    timeZone
+  ));
+};
 
-      let endYear = baseYear;
-      let endMonth = baseMonth - 1;
-      let endDay = baseDay;
+/**
+ * Veterinary appointment chats open exactly at the appointment start and stay
+ * open until the assigned veterinarian explicitly completes the conversation.
+ */
+const assertAppointmentChatHasStarted = (appointment) => {
+  const start = getAppointmentStart(appointment);
+  if (new Date() < start) {
+    throw new Error('Chat will be available when the appointment time starts.');
+  }
+};
 
-      if (tzOffsetMinutes !== null) {
-        const appointmentDateInTz = new Date(appointmentDateUTC.getTime() + tzOffsetMinutes * 60 * 1000);
-        endYear = appointmentDateInTz.getUTCFullYear();
-        endMonth = appointmentDateInTz.getUTCMonth();
-        endDay = appointmentDateInTz.getUTCDate();
-      }
+const sameId = (left, right) => String(left || '') === String(right || '');
 
-      if (endTimeMinutes < startTimeMinutes && startTimeMinutes - endTimeMinutes > 12 * 60) {
-        const nextDay = new Date(Date.UTC(endYear, endMonth, endDay + 1));
-        endYear = nextDay.getUTCFullYear();
-        endMonth = nextDay.getUTCMonth();
-        endDay = nextDay.getUTCDate();
-      }
+const assertConversationParticipant = (conversation, userId) => {
+  const participantIds = [conversation.veterinarianId, conversation.petOwnerId, conversation.adminId]
+    .filter(Boolean)
+    .map((id) => String(id));
 
-      const appointmentEndDateTimeUTC = new Date(Date.UTC(endYear, endMonth, endDay, endHours, endMinutes, 0, 0));
-      end = tzOffsetMinutes !== null
-        ? new Date(appointmentEndDateTimeUTC.getTime() - tzOffsetMinutes * 60 * 1000)
-        : appointmentEndDateTimeUTC;
+  if (!participantIds.includes(String(userId))) {
+    throw new Error('You do not have access to this conversation');
+  }
+};
+
+const resolveMergedConversation = async (conversation) => {
+  let resolvedConversation = conversation;
+  const visitedConversationIds = new Set();
+
+  while (resolvedConversation?.mergedInto) {
+    const currentId = String(resolvedConversation._id);
+    if (visitedConversationIds.has(currentId)) {
+      throw new Error('Conversation merge chain is invalid');
     }
-  }
-  if (!end) {
-    end = new Date(start.getTime() + duration * 60 * 1000);
-  }
-
-  const windowStart = new Date(start.getTime() - 15 * 60 * 1000);
-  const windowEnd = new Date(end.getTime() + 30 * 60 * 1000);
-
-  if (now < windowStart) {
-    return { isValid: false, message: 'Communication will be available 15 minutes before the appointment time' };
+    visitedConversationIds.add(currentId);
+    resolvedConversation = await Conversation.findById(resolvedConversation.mergedInto);
   }
 
-  if (now > windowEnd) {
-    return { isValid: false, message: 'Communication window has expired. It was available until 30 minutes after the appointment end time.' };
+  return resolvedConversation;
+};
+
+/**
+ * A veterinarian and pet owner have one continuous conversation. Older
+ * appointment-specific records are soft-merged so their messages remain in
+ * the current chat without leaving duplicate rows in the chat list.
+ */
+const consolidateVeterinarianPetOwnerConversations = async (veterinarianId, petOwnerId, preferredAppointmentId = null) => {
+  const conversations = await Conversation.find({
+    veterinarianId,
+    petOwnerId,
+    conversationType: 'VETERINARIAN_PET_OWNER',
+    mergedInto: null
+  }).sort({ lastMessageAt: -1, updatedAt: -1 });
+
+  if (conversations.length === 0) return null;
+
+  const canonicalConversation =
+    conversations.find((conversation) => preferredAppointmentId && sameId(conversation.appointmentId, preferredAppointmentId)) ||
+    conversations.find((conversation) => conversation.status !== 'COMPLETED') ||
+    conversations[0];
+
+  const duplicateConversations = conversations.filter((conversation) => !sameId(conversation._id, canonicalConversation._id));
+  if (duplicateConversations.length === 0) return canonicalConversation;
+
+  const newestConversation = conversations.reduce((newest, conversation) => {
+    const newestTime = newest?.lastMessageAt ? new Date(newest.lastMessageAt).getTime() : 0;
+    const candidateTime = conversation.lastMessageAt ? new Date(conversation.lastMessageAt).getTime() : 0;
+    return candidateTime > newestTime ? conversation : newest;
+  }, canonicalConversation);
+
+  const duplicateIds = duplicateConversations.map((conversation) => conversation._id);
+  await ChatMessage.updateMany(
+    { conversationId: { $in: duplicateIds } },
+    { $set: { conversationId: canonicalConversation._id } }
+  );
+  await Conversation.updateMany(
+    { _id: { $in: duplicateIds } },
+    { $set: { mergedInto: canonicalConversation._id } }
+  );
+
+  if (newestConversation.lastMessageAt &&
+      (!canonicalConversation.lastMessageAt || new Date(newestConversation.lastMessageAt) > new Date(canonicalConversation.lastMessageAt))) {
+    canonicalConversation.lastMessageAt = newestConversation.lastMessageAt;
+    canonicalConversation.lastMessage = newestConversation.lastMessage;
+    await canonicalConversation.save();
   }
 
-  return { isValid: true };
+  return canonicalConversation;
+};
+
+const consolidateLegacyConversationsForUser = async (userId, userRole) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) return;
+  if (userRole !== 'VETERINARIAN' && userRole !== 'PET_OWNER') return;
+
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const userMatch = userRole === 'VETERINARIAN'
+    ? { veterinarianId: userObjectId }
+    : { petOwnerId: userObjectId };
+
+  const duplicateRelationships = await Conversation.aggregate([
+    {
+      $match: {
+        ...userMatch,
+        conversationType: 'VETERINARIAN_PET_OWNER',
+        mergedInto: null
+      }
+    },
+    {
+      $group: {
+        _id: { veterinarianId: '$veterinarianId', petOwnerId: '$petOwnerId' },
+        count: { $sum: 1 }
+      }
+    },
+    { $match: { count: { $gt: 1 } } },
+    { $limit: 50 }
+  ]).option({ maxTimeMS: 3000 });
+
+  await Promise.all(duplicateRelationships.map(({ _id: relationship }) =>
+    consolidateVeterinarianPetOwnerConversations(relationship.veterinarianId, relationship.petOwnerId)
+  ));
 };
 
 /**
@@ -106,6 +227,7 @@ const sendMessage = async (data) => {
     fileUrl,
     fileName,
     appointmentId,
+    conversationId,
     attachments,
   } = data;
 
@@ -250,32 +372,40 @@ const sendMessage = async (data) => {
       throw new Error('Appointment does not match the provided veterinarian and pet owner');
     }
 
-    if (appointment.status !== 'CONFIRMED') {
-      throw new Error('Appointment must be confirmed before communication can begin');
+    // This check applies to conversations created by an earlier version too:
+    // no appointment chat can be used before its scheduled start time.
+    assertAppointmentChatHasStarted(appointment);
+
+    let conversation = null;
+
+    if (conversationId) {
+      conversation = await Conversation.findById(conversationId);
+      conversation = await resolveMergedConversation(conversation);
+      if (!conversation || conversation.conversationType !== 'VETERINARIAN_PET_OWNER') {
+        throw new Error('Conversation not found');
+      }
+      if (
+        !sameId(conversation.veterinarianId, veterinarianId) ||
+        !sameId(conversation.petOwnerId, petOwnerId)
+      ) {
+        throw new Error('Conversation does not belong to this veterinarian and pet owner');
+      }
+    } else {
+      conversation = await consolidateVeterinarianPetOwnerConversations(veterinarianId, petOwnerId, appointment._id);
     }
 
-    const timeWindowCheck = isWithinAppointmentWindow(appointment);
-    if (!timeWindowCheck.isValid) {
-      throw new Error(timeWindowCheck.message);
-    }
-
-    let conversation = await Conversation.findOne({
-      veterinarianId,
-      petOwnerId,
-      appointmentId: appointment._id,
-      conversationType: 'VETERINARIAN_PET_OWNER'
-    });
-
-    if (!conversation) {
-      await subscriptionPolicy.enforceChatStartLimit({ veterinarianId });
-
-      conversation = await Conversation.create({
+    if (!conversation || !sameId(conversation.appointmentId, appointment._id)) {
+      conversation = await getOrCreateConversation(
         veterinarianId,
         petOwnerId,
-        appointmentId: appointment._id,
-        conversationType: 'VETERINARIAN_PET_OWNER',
-        lastMessageAt: new Date()
-      });
+        null,
+        appointment._id,
+        senderId
+      );
+    }
+
+    if (conversation.status === 'COMPLETED') {
+      throw new Error('This chat has been marked as completed by the veterinarian. No further messages can be sent.');
     }
 
     conversation.lastMessageAt = new Date();
@@ -315,24 +445,26 @@ const sendMessage = async (data) => {
 /**
  * Get messages for conversation
  */
-const getMessages = async (conversationId, options = {}) => {
+const getMessages = async (conversationId, userId, options = {}) => {
   const { page = 1, limit = 50 } = options;
   const skip = (page - 1) * limit;
 
-  const conversation = await Conversation.findById(conversationId)
+  let conversation = await Conversation.findById(conversationId)
     .maxTimeMS(2000);
+  conversation = await resolveMergedConversation(conversation);
   if (!conversation) {
     throw new Error('Conversation not found');
   }
+  assertConversationParticipant(conversation, userId);
 
   const [messagesRaw, total] = await Promise.all([
-    ChatMessage.find({ conversationId })
+    ChatMessage.find({ conversationId: conversation._id })
       .lean()
       .maxTimeMS(3000)
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 }),
-    ChatMessage.countDocuments({ conversationId }).maxTimeMS(2000)
+    ChatMessage.countDocuments({ conversationId: conversation._id }).maxTimeMS(2000)
   ]);
 
   // Populate separately for better performance
@@ -364,7 +496,7 @@ const getMessages = async (conversationId, options = {}) => {
 /**
  * Get or create conversation
  */
-const getOrCreateConversation = async (veterinarianId, petOwnerId, adminId, appointmentId) => {
+const getOrCreateConversation = async (veterinarianId, petOwnerId, adminId, appointmentId, actorId = null) => {
   const isVeterinarianPetOwnerChat = !!petOwnerId && !!appointmentId;
   const isAdminVeterinarianChat = !isVeterinarianPetOwnerChat;
 
@@ -389,6 +521,10 @@ const getOrCreateConversation = async (veterinarianId, petOwnerId, adminId, appo
 
     if (!veterinarian || veterinarian.role !== 'VETERINARIAN') {
       throw new Error('Veterinarian not found');
+    }
+
+    if (actorId && !sameId(actorId, resolvedAdminId) && !sameId(actorId, veterinarianId)) {
+      throw new Error('You do not have access to this conversation');
     }
 
     let conversation = await Conversation.findOne({
@@ -437,26 +573,53 @@ const getOrCreateConversation = async (veterinarianId, petOwnerId, adminId, appo
       throw new Error('Appointment not found');
     }
 
-    if (appointment.status !== 'CONFIRMED') {
+    if (!sameId(appointment.veterinarianId, veterinarianId) || !sameId(appointment.petOwnerId, petOwnerId)) {
+      throw new Error('Appointment does not match the provided veterinarian and pet owner');
+    }
+
+    if (actorId && !sameId(actorId, veterinarianId) && !sameId(actorId, petOwnerId)) {
+      throw new Error('You do not have access to this appointment chat');
+    }
+
+    // A conversation may have been created by an older version before the
+    // appointment began. Enforce the start rule for both existing and new chats.
+    assertAppointmentChatHasStarted(appointment);
+
+    // One ongoing relationship chat is reused for each future appointment.
+    // Any legacy appointment-specific conversations are merged into it first.
+    let conversation = await consolidateVeterinarianPetOwnerConversations(
+      veterinarianId,
+      petOwnerId,
+      appointment._id
+    );
+
+    if (conversation) {
+      await conversation.populate('veterinarianId', 'name email phone profileImage');
+      await conversation.populate('petOwnerId', 'name email phone profileImage');
+      await conversation.populate('appointmentId', 'appointmentDate appointmentTime status');
+    }
+
+    const isNewAppointmentForConversation = conversation &&
+      !sameId(conversation.appointmentId?._id || conversation.appointmentId, appointment._id);
+    if (isNewAppointmentForConversation && !['CONFIRMED', 'COMPLETED'].includes(appointment.status)) {
       throw new Error('Appointment must be confirmed before communication can begin');
     }
 
-    const timeWindowCheck = isWithinAppointmentWindow(appointment);
-    if (!timeWindowCheck.isValid) {
-      throw new Error(timeWindowCheck.message);
+    if (conversation && conversation.status === 'COMPLETED') {
+      if (sameId(conversation.appointmentId?._id || conversation.appointmentId, appointment._id)) {
+        throw new Error('This chat has been marked as completed by the veterinarian. No further messages can be sent.');
+      }
+
+      conversation.status = 'ACTIVE';
+      conversation.completedAt = null;
+      conversation.completedBy = null;
     }
 
-    let conversation = await Conversation.findOne({
-      veterinarianId,
-      petOwnerId,
-      appointmentId: appointment._id,
-      conversationType: 'VETERINARIAN_PET_OWNER'
-    })
-      .populate('veterinarianId', 'name email phone profileImage')
-      .populate('petOwnerId', 'name email phone profileImage')
-      .populate('appointmentId', 'appointmentDate appointmentTime status');
-
     if (!conversation) {
+      if (!['CONFIRMED', 'COMPLETED'].includes(appointment.status)) {
+        throw new Error('Appointment must be confirmed before communication can begin');
+      }
+
       await subscriptionPolicy.enforceChatStartLimit({ veterinarianId });
 
       conversation = await Conversation.create({
@@ -469,6 +632,13 @@ const getOrCreateConversation = async (veterinarianId, petOwnerId, adminId, appo
       await conversation.populate('veterinarianId', 'name email phone profileImage');
       await conversation.populate('petOwnerId', 'name email phone profileImage');
       await conversation.populate('appointmentId', 'appointmentDate appointmentTime status');
+    } else if (isNewAppointmentForConversation) {
+      conversation.appointmentId = appointment._id;
+      conversation.lastMessageAt = new Date();
+      await conversation.save();
+      await conversation.populate('appointmentId', 'appointmentDate appointmentTime status');
+    } else if (conversation.isModified()) {
+      await conversation.save();
     }
 
     return conversation;
@@ -481,6 +651,10 @@ const getOrCreateConversation = async (veterinarianId, petOwnerId, adminId, appo
 const getConversations = async (userId, userRole, options = {}) => {
   const { page = 1, limit = 20 } = options;
   const skip = (page - 1) * limit;
+
+  // This is a one-time, lossless upgrade path for duplicate conversations
+  // created under the older appointment-per-chat behaviour.
+  await consolidateLegacyConversationsForUser(userId, userRole);
 
   let query = {};
 
@@ -498,6 +672,8 @@ const getConversations = async (userId, userRole, options = {}) => {
   } else {
     throw new Error('Invalid role');
   }
+
+  query = { ...query, mergedInto: null };
 
   const [conversationsRaw, total] = await Promise.all([
     Conversation.find(query)
@@ -594,10 +770,12 @@ const getConversations = async (userId, userRole, options = {}) => {
  * Mark messages as read
  */
 const markMessagesAsRead = async (conversationId, userId) => {
-  const conversation = await Conversation.findById(conversationId);
+  let conversation = await Conversation.findById(conversationId);
+  conversation = await resolveMergedConversation(conversation);
   if (!conversation) {
     throw new Error('Conversation not found');
   }
+  assertConversationParticipant(conversation, userId);
 
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     throw new Error('Invalid user ID');
@@ -607,7 +785,7 @@ const markMessagesAsRead = async (conversationId, userId) => {
 
   const result = await ChatMessage.updateMany(
     {
-      conversationId,
+      conversationId: conversation._id,
       senderId: { $ne: userObjectId },
       'readBy.userId': { $ne: userObjectId }
     },
@@ -653,6 +831,8 @@ const getUnreadCount = async (userId, userRole) => {
     return 0;
   }
 
+  conversationQuery = { ...conversationQuery, mergedInto: null };
+
   const conversations = await Conversation.find(conversationQuery).select('_id');
   const conversationIds = conversations.map(c => c._id);
 
@@ -665,11 +845,42 @@ const getUnreadCount = async (userId, userRole) => {
   return unreadCount;
 };
 
+/**
+ * Mark conversation as completed (Veterinarian only)
+ */
+const markConversationComplete = async (conversationId, veterinarianId) => {
+  let conversation = await Conversation.findById(conversationId);
+  conversation = await resolveMergedConversation(conversation);
+  if (!conversation) {
+    throw new Error('Conversation not found');
+  }
+
+  if (conversation.conversationType !== 'VETERINARIAN_PET_OWNER') {
+    throw new Error('Can only complete veterinarian-pet owner conversations');
+  }
+
+  if (conversation.veterinarianId.toString() !== veterinarianId) {
+    throw new Error('Only the assigned veterinarian can mark this chat as completed');
+  }
+
+  if (conversation.status === 'COMPLETED') {
+    throw new Error('Conversation is already marked as completed');
+  }
+
+  conversation.status = 'COMPLETED';
+  conversation.completedAt = new Date();
+  conversation.completedBy = veterinarianId;
+  await conversation.save();
+
+  return conversation;
+};
+
 module.exports = {
   sendMessage,
   getMessages,
   getOrCreateConversation,
   getConversations,
   markMessagesAsRead,
-  getUnreadCount
+  getUnreadCount,
+  markConversationComplete
 };

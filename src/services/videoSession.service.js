@@ -2,12 +2,17 @@ const VideoSession = require('../models/VideoSession');
 const Appointment = require('../models/Appointment');
 const streamService = require('./stream.service');
 
-/**
- * Check if current time is within appointment window
- */
+const createHttpError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const getId = (value) => (value?._id || value)?.toString?.() || String(value || '');
+
 const getTimeZoneOffsetMinutes = (date, timeZone) => {
   try {
-    const dtf = new Intl.DateTimeFormat('en-US', {
+    const parts = new Intl.DateTimeFormat('en-US', {
       timeZone,
       hour12: false,
       year: 'numeric',
@@ -16,11 +21,11 @@ const getTimeZoneOffsetMinutes = (date, timeZone) => {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-    });
-    const parts = dtf.formatToParts(date).reduce((acc, p) => {
-      if (p.type !== 'literal') acc[p.type] = p.value;
+    }).formatToParts(date).reduce((acc, part) => {
+      if (part.type !== 'literal') acc[part.type] = part.value;
       return acc;
     }, {});
+
     const asUTC = Date.UTC(
       Number(parts.year),
       Number(parts.month) - 1,
@@ -36,260 +41,254 @@ const getTimeZoneOffsetMinutes = (date, timeZone) => {
 };
 
 const zonedDateTimeToUtcMs = ({ year, month, day, hour, minute }, timeZone) => {
-  let guess = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
-  let offset = getTimeZoneOffsetMinutes(new Date(guess), timeZone);
-  if (typeof offset !== 'number' || !Number.isFinite(offset)) {
-    return guess;
-  }
+  const guess = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  const offset = getTimeZoneOffsetMinutes(new Date(guess), timeZone);
+  if (!Number.isFinite(offset)) return guess;
+
   let utcMs = guess - offset * 60 * 1000;
-  // Re-check once to handle DST transitions
-  const offset2 = getTimeZoneOffsetMinutes(new Date(utcMs), timeZone);
-  if (typeof offset2 === 'number' && Number.isFinite(offset2) && offset2 !== offset) {
-    utcMs = guess - offset2 * 60 * 1000;
+  const adjustedOffset = getTimeZoneOffsetMinutes(new Date(utcMs), timeZone);
+  if (Number.isFinite(adjustedOffset) && adjustedOffset !== offset) {
+    utcMs = guess - adjustedOffset * 60 * 1000;
   }
   return utcMs;
 };
 
 const computeAppointmentWindow = (appointment) => {
-  const appointmentDateUTC = appointment.appointmentDate instanceof Date
-    ? appointment.appointmentDate
-    : new Date(appointment.appointmentDate);
-
-  // appointmentDate is stored as date-only; use UTC parts to avoid server-local timezone shifts.
-  const baseYear = appointmentDateUTC.getUTCFullYear();
-  const baseMonth = appointmentDateUTC.getUTCMonth() + 1;
-  const baseDay = appointmentDateUTC.getUTCDate();
-
+  const appointmentDate = new Date(appointment.appointmentDate);
+  const baseYear = appointmentDate.getUTCFullYear();
+  const baseMonth = appointmentDate.getUTCMonth() + 1;
+  const baseDay = appointmentDate.getUTCDate();
   const [startHours, startMinutes] = String(appointment.appointmentTime || '').split(':').map(Number);
+
   if (!Number.isFinite(startHours) || !Number.isFinite(startMinutes)) {
-    throw new Error('Invalid appointment time');
+    throw createHttpError('Invalid appointment time');
   }
 
-  const duration = appointment.appointmentDuration || 30;
+  const offset = Number.isFinite(appointment.timezoneOffset) ? appointment.timezoneOffset : null;
+  const timeZone = typeof appointment.timezone === 'string' && appointment.timezone.includes('/')
+    ? appointment.timezone
+    : 'Europe/Rome';
 
-  const tzOffsetMinutes =
-    typeof appointment.timezoneOffset === 'number' && Number.isFinite(appointment.timezoneOffset)
-      ? appointment.timezoneOffset
-      : null;
-  const tzNameRaw = typeof appointment.timezone === 'string' ? appointment.timezone : null;
-  const timeZone = tzNameRaw && tzNameRaw.includes('/') ? tzNameRaw : 'Europe/Rome';
-
-  // If we have a numeric offset, follow the proven offset-based algorithm (myDoctor/react-conversion)
-  if (tzOffsetMinutes !== null) {
-    const appointmentDateInTz = new Date(appointmentDateUTC.getTime() + tzOffsetMinutes * 60 * 1000);
-    const year = appointmentDateInTz.getUTCFullYear();
-    const month = appointmentDateInTz.getUTCMonth();
-    const day = appointmentDateInTz.getUTCDate();
-
-    const appointmentStartDateTimeUTC = new Date(Date.UTC(year, month, day, startHours, startMinutes, 0, 0));
-    const start = new Date(appointmentStartDateTimeUTC.getTime() - tzOffsetMinutes * 60 * 1000);
-
-    let end;
-    if (appointment.appointmentEndTime) {
-      const [endHours, endMinutes] = String(appointment.appointmentEndTime || '').split(':').map(Number);
-      if (Number.isFinite(endHours) && Number.isFinite(endMinutes)) {
-        const startTimeMinutes = startHours * 60 + startMinutes;
-        const endTimeMinutes = endHours * 60 + endMinutes;
-
-        let endYear = year;
-        let endMonth = month;
-        let endDay = day;
-
-        if (endTimeMinutes < startTimeMinutes && startTimeMinutes - endTimeMinutes > 12 * 60) {
-          const nextDay = new Date(Date.UTC(year, month, day + 1));
-          endYear = nextDay.getUTCFullYear();
-          endMonth = nextDay.getUTCMonth();
-          endDay = nextDay.getUTCDate();
-        }
-
-        const appointmentEndDateTimeUTC = new Date(Date.UTC(endYear, endMonth, endDay, endHours, endMinutes, 0, 0));
-        end = new Date(appointmentEndDateTimeUTC.getTime() - tzOffsetMinutes * 60 * 1000);
-      }
-    }
-    if (!end) {
-      end = new Date(start.getTime() + duration * 60 * 1000);
-    }
-
-    return { start, end };
+  let start;
+  let dateParts = { year: baseYear, month: baseMonth, day: baseDay };
+  if (offset !== null) {
+    const dateInZone = new Date(appointmentDate.getTime() + offset * 60 * 1000);
+    dateParts = {
+      year: dateInZone.getUTCFullYear(),
+      month: dateInZone.getUTCMonth() + 1,
+      day: dateInZone.getUTCDate(),
+    };
+    start = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, startHours, startMinutes) - offset * 60 * 1000);
+  } else {
+    start = new Date(zonedDateTimeToUtcMs({ ...dateParts, hour: startHours, minute: startMinutes }, timeZone));
   }
-
-  // Otherwise, use IANA timezone conversion (DST-safe) for Italy.
-  const startUtcMs = zonedDateTimeToUtcMs(
-    { year: baseYear, month: baseMonth, day: baseDay, hour: startHours, minute: startMinutes },
-    timeZone
-  );
-  const start = new Date(startUtcMs);
 
   let end;
   if (appointment.appointmentEndTime) {
-    const [endHours, endMinutes] = String(appointment.appointmentEndTime || '').split(':').map(Number);
+    const [endHours, endMinutes] = String(appointment.appointmentEndTime).split(':').map(Number);
     if (Number.isFinite(endHours) && Number.isFinite(endMinutes)) {
-      const startTimeMinutes = startHours * 60 + startMinutes;
-      const endTimeMinutes = endHours * 60 + endMinutes;
-      let endYear = baseYear;
-      let endMonth = baseMonth;
-      let endDay = baseDay;
-      if (endTimeMinutes < startTimeMinutes && startTimeMinutes - endTimeMinutes > 12 * 60) {
-        const next = new Date(Date.UTC(baseYear, baseMonth - 1, baseDay + 1));
-        endYear = next.getUTCFullYear();
-        endMonth = next.getUTCMonth() + 1;
-        endDay = next.getUTCDate();
-      }
-      const endUtcMs = zonedDateTimeToUtcMs(
-        { year: endYear, month: endMonth, day: endDay, hour: endHours, minute: endMinutes },
-        timeZone
-      );
-      end = new Date(endUtcMs);
+      const startsAfterEndsByDay = startHours * 60 + startMinutes - (endHours * 60 + endMinutes) > 12 * 60;
+      const endDate = startsAfterEndsByDay
+        ? new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day + 1))
+        : new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day));
+      const endParts = {
+        year: endDate.getUTCFullYear(),
+        month: endDate.getUTCMonth() + 1,
+        day: endDate.getUTCDate(),
+      };
+      end = offset !== null
+        ? new Date(Date.UTC(endParts.year, endParts.month - 1, endParts.day, endHours, endMinutes) - offset * 60 * 1000)
+        : new Date(zonedDateTimeToUtcMs({ ...endParts, hour: endHours, minute: endMinutes }, timeZone));
     }
   }
-  if (!end) {
-    end = new Date(start.getTime() + duration * 60 * 1000);
-  }
 
+  if (!end) end = new Date(start.getTime() + (appointment.appointmentDuration || 30) * 60 * 1000);
   return { start, end };
 };
 
-const isWithinAppointmentWindow = (appointment) => {
-  const now = new Date();
+const assertAppointmentWindow = (appointment) => {
   const { start, end } = computeAppointmentWindow(appointment);
-
-  const bufferTime = 2 * 60 * 1000;
-  const windowStart = new Date(start.getTime() - bufferTime);
-  const windowEnd = end;
-
-  // Check expiry first for clearer messaging
-  if (now > windowEnd) {
-    return { isValid: false, message: 'Communication window has expired' };
+  const now = new Date();
+  if (now < start) {
+    throw createHttpError('Video calling becomes available at the appointment start time');
   }
-
-  if (now < windowStart) {
-    return { isValid: false, message: 'Communication will be available 2 minutes before the appointment time' };
+  if (now > end) {
+    throw createHttpError('The appointment call window has ended');
   }
-
-  return { isValid: true };
 };
 
-/**
- * Start video session
- */
-const startSession = async (appointmentId, userId, userName) => {
+const loadAppointmentForParticipant = async (appointmentId, userId) => {
   const appointment = await Appointment.findById(appointmentId)
-    .populate('veterinarianId', 'name')
-    .populate('petOwnerId', 'name')
+    .populate('veterinarianId', 'name fullName email profileImage')
+    .populate('petOwnerId', 'name fullName email profileImage')
     .populate('petId', 'name');
-  
-  if (!appointment) {
-    throw new Error('Appointment not found');
+
+  if (!appointment) throw createHttpError('Appointment not found', 404);
+  if (appointment.status !== 'CONFIRMED') throw createHttpError('Appointment must be confirmed before video calling can start');
+  if (appointment.bookingType !== 'ONLINE') throw createHttpError('Video calling is only available for online appointments');
+
+  const veterinarianId = getId(appointment.veterinarianId);
+  const petOwnerId = getId(appointment.petOwnerId);
+  const currentUserId = getId(userId);
+  if (currentUserId !== veterinarianId && currentUserId !== petOwnerId) {
+    throw createHttpError('You are not a participant in this appointment', 403);
   }
 
-  if (appointment.status !== 'CONFIRMED') {
-    throw new Error('Appointment must be confirmed before video call can start');
-  }
+  return { appointment, veterinarianId, petOwnerId, currentUserId };
+};
 
-  if (appointment.bookingType !== 'ONLINE') {
-    throw new Error('Video call is only available for online appointments');
-  }
-
-  // Check time window
-  const timeWindowCheck = isWithinAppointmentWindow(appointment);
-  if (!timeWindowCheck.isValid) {
-    throw new Error(timeWindowCheck.message);
-  }
-
-  // Check if session already exists
-  let session = await VideoSession.findOne({ appointmentId });
-  const streamCallId = `appointment-${appointmentId}`;
-
-  if (!session) {
-    // Create Stream call (optional)
-    try {
-      await streamService.createCall(streamCallId, {
-        appointmentId: appointmentId.toString(),
-        veterinarianId: appointment.veterinarianId._id.toString(),
-        petOwnerId: appointment.petOwnerId._id.toString()
-      });
-    } catch (error) {
-      console.error('Failed to create Stream call:', error);
-    }
-
-    session = await VideoSession.create({
-      appointmentId,
-      veterinarianId: appointment.veterinarianId._id,
-      petOwnerId: appointment.petOwnerId._id,
-      sessionId: streamCallId,
-      callId: streamCallId,
-      startedAt: new Date()
-    });
-
-    appointment.videoSessionId = session._id;
-    await appointment.save();
-  } else {
-    session.startedAt = new Date();
-    await session.save();
-  }
-
-  // Generate Stream token
-  const streamToken = streamService.generateUserToken(userId, userName);
-
+const serializeSession = (session, currentUserId) => {
+  const raw = session.toObject ? session.toObject() : session;
+  const callerIsVeterinarian = getId(raw.initiatedBy) === getId(raw.veterinarianId);
+  const caller = callerIsVeterinarian ? raw.veterinarianId : raw.petOwnerId;
+  const recipient = callerIsVeterinarian ? raw.petOwnerId : raw.veterinarianId;
   return {
-    session,
-    streamToken,
-    streamCallId
+    ...raw,
+    isIncoming: getId(raw.initiatedBy) !== getId(currentUserId),
+    caller: caller && typeof caller === 'object'
+      ? { _id: caller._id, name: caller.name || caller.fullName || caller.email || 'User', profileImage: caller.profileImage || null }
+      : null,
+    recipient: recipient && typeof recipient === 'object'
+      ? { _id: recipient._id, name: recipient.name || recipient.fullName || recipient.email || 'User', profileImage: recipient.profileImage || null }
+      : null,
   };
 };
 
-/**
- * End video session
- */
-const endSession = async (sessionId) => {
-  const session = await VideoSession.findById(sessionId);
-  
-  if (!session) {
-    throw new Error('Video session not found');
-  }
+const getStreamCredentials = (session, userId, userName) => ({
+  session,
+  streamToken: streamService.generateUserToken(userId, userName),
+  streamCallId: session.sessionId || session.callId,
+});
 
-  if (session.callId) {
-    try {
-      await streamService.endCall(session.callId);
-    } catch (error) {
-      console.error('Error ending Stream call:', error);
+const startSession = async (appointmentId, userId, userName) => {
+  const { appointment, veterinarianId, petOwnerId, currentUserId } = await loadAppointmentForParticipant(appointmentId, userId);
+  assertAppointmentWindow(appointment);
+
+  let session = await VideoSession.findOne({ appointmentId }).sort({ updatedAt: -1 });
+  if (session?.status === 'RINGING') {
+    if (getId(session.initiatedBy) !== currentUserId) {
+      throw createHttpError('The other participant is already calling');
     }
+    return getStreamCredentials(session, userId, userName);
+  }
+  if (session?.status === 'ACTIVE') {
+    throw createHttpError('This appointment call is already active');
   }
 
-  const duration = session.startedAt 
-    ? Math.floor((new Date() - session.startedAt) / 1000)
-    : null;
-
-  session.endedAt = new Date();
-  session.duration = duration;
+  const streamCallId = `appointment-${appointmentId}-${Date.now()}`;
+  const now = new Date();
+  if (!session) {
+    session = new VideoSession({ appointmentId, veterinarianId, petOwnerId });
+  }
+  session.sessionId = streamCallId;
+  session.callId = streamCallId;
+  session.status = 'RINGING';
+  session.initiatedBy = userId;
+  session.acceptedBy = null;
+  session.ringingAt = now;
+  session.acceptedAt = null;
+  session.startedAt = null;
+  session.endedAt = null;
+  session.endedBy = null;
+  session.duration = null;
   await session.save();
 
+  appointment.videoSessionId = session._id;
+  await appointment.save();
+
+  return getStreamCredentials(session, userId, userName);
+};
+
+const acceptSession = async (sessionId, userId, userName) => {
+  const session = await VideoSession.findById(sessionId)
+    .populate('appointmentId')
+    .populate('veterinarianId', 'name fullName email profileImage')
+    .populate('petOwnerId', 'name fullName email profileImage');
+  if (!session) throw createHttpError('Video call not found', 404);
+
+  const appointment = session.appointmentId;
+  const currentUserId = getId(userId);
+  const isParticipant = currentUserId === getId(session.veterinarianId) || currentUserId === getId(session.petOwnerId);
+  if (!isParticipant) throw createHttpError('You are not a participant in this call', 403);
+  if (getId(session.initiatedBy) === currentUserId) throw createHttpError('The caller cannot accept their own call');
+  if (session.status !== 'RINGING') throw createHttpError('This call is no longer ringing');
+
+  assertAppointmentWindow(appointment);
+  const now = new Date();
+  session.status = 'ACTIVE';
+  session.acceptedBy = userId;
+  session.acceptedAt = now;
+  session.startedAt = now;
+  await session.save();
+
+  return getStreamCredentials(session, userId, userName);
+};
+
+const endSession = async (sessionId, userId) => {
+  const session = await VideoSession.findById(sessionId);
+  if (!session) throw createHttpError('Video call not found', 404);
+
+  const currentUserId = getId(userId);
+  const isParticipant = currentUserId === getId(session.veterinarianId) || currentUserId === getId(session.petOwnerId);
+  if (!isParticipant) throw createHttpError('You are not a participant in this call', 403);
+
+  if (session.status === 'RINGING') {
+    session.status = getId(session.initiatedBy) === currentUserId ? 'MISSED' : 'DECLINED';
+  } else if (session.status === 'ACTIVE') {
+    session.status = 'ENDED';
+  }
+  session.endedAt = new Date();
+  session.endedBy = userId;
+  session.duration = session.startedAt ? Math.floor((session.endedAt - session.startedAt) / 1000) : 0;
+  await session.save();
+
+  try {
+    if (session.callId) await streamService.endCall(session.callId);
+  } catch (error) {
+    console.error('Error ending Stream call:', error);
+  }
   return session;
 };
 
-/**
- * Get session by appointment ID
- */
 const getSessionByAppointment = async (appointmentId, userId, userName) => {
+  await loadAppointmentForParticipant(appointmentId, userId);
   const session = await VideoSession.findOne({ appointmentId })
-    .populate('veterinarianId', 'name email phone profileImage')
-    .populate('petOwnerId', 'name email phone profileImage');
-  
-  if (!session) {
-    throw new Error('Video session not found');
+    .populate('veterinarianId', 'name fullName email profileImage')
+    .populate('petOwnerId', 'name fullName email profileImage')
+    .sort({ updatedAt: -1 });
+  if (!session) throw createHttpError('Video call not found', 404);
+  return getStreamCredentials(session, userId, userName);
+};
+
+const getIncomingSessions = async (userId) => {
+  const sessions = await VideoSession.find({
+    status: 'RINGING',
+    $or: [{ veterinarianId: userId }, { petOwnerId: userId }],
+    initiatedBy: { $ne: userId },
+  })
+    .populate('appointmentId', 'appointmentDate appointmentTime appointmentEndTime appointmentDuration appointmentNumber timezone timezoneOffset petId')
+    .populate('veterinarianId', 'name fullName email profileImage')
+    .populate('petOwnerId', 'name fullName email profileImage')
+    .sort({ ringingAt: -1 });
+
+  const activeSessions = [];
+  for (const session of sessions) {
+    try {
+      assertAppointmentWindow(session.appointmentId);
+      activeSessions.push(serializeSession(session, userId));
+    } catch {
+      session.status = 'MISSED';
+      session.endedAt = new Date();
+      await session.save();
+    }
   }
-
-  const streamToken = streamService.generateUserToken(userId, userName);
-
-  return {
-    session,
-    streamToken,
-    streamCallId: session.sessionId || session.callId
-  };
+  return activeSessions;
 };
 
 module.exports = {
   startSession,
+  acceptSession,
   endSession,
-  getSessionByAppointment
+  getSessionByAppointment,
+  getIncomingSessions,
 };

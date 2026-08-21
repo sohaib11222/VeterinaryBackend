@@ -11,10 +11,16 @@ router.use(authGuard());
  */
 router.post('/create', asyncHandler(videoSessionController.startSession));
 
+/** Accept a call that is ringing for the authenticated participant. */
+router.post('/accept', asyncHandler(videoSessionController.acceptSession));
+
 /**
  * End video session
  */
 router.post('/end', asyncHandler(videoSessionController.endSession));
+
+/** Calls currently ringing for the authenticated user. */
+router.get('/incoming', asyncHandler(videoSessionController.getIncoming));
 
 /**
  * Get session by appointment ID

@@ -36,4 +36,12 @@ router.post('/conversations/:conversationId/read', asyncHandler(chatController.m
  */
 router.get('/unread-count', asyncHandler(chatController.getUnreadCount));
 
+/**
+ * Mark conversation as completed (Veterinarian only)
+ */
+// The router-level auth guard already authenticates this request. The service
+// verifies that the authenticated user is the conversation's veterinarian.
+// Avoiding a second token verification fixes intermittent 401s on this action.
+router.post('/conversations/:conversationId/complete', asyncHandler(chatController.markConversationComplete));
+
 module.exports = router;

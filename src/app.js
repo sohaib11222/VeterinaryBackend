@@ -10,8 +10,12 @@ require("./config/env"); // load ENV
 
 const app = express();
 
-// Set request timeout (30 seconds)
-app.use(timeout(30000));
+// General API requests should fail quickly, but chat uploads can legitimately
+// take longer on mobile connections (each file may be up to 50 MB).
+app.use((req, res, next) => {
+  const requestTimeout = req.path.startsWith('/api/upload/') ? 120000 : 30000;
+  return timeout(requestTimeout)(req, res, next);
+});
 
 // CORS configuration - Allow all origins
 app.use(cors({

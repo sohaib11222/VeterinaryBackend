@@ -36,8 +36,32 @@ exports.startSession = asyncHandler(async (req, res) => {
  */
 exports.endSession = asyncHandler(async (req, res) => {
   const { sessionId } = req.body;
-  const result = await videoSessionService.endSession(sessionId);
+  if (!sessionId) {
+    return res.status(400).json({ success: false, message: 'Video call ID is required' });
+  }
+  const result = await videoSessionService.endSession(sessionId, req.userId);
   return sendSuccess(res, 'Video session ended', result);
+});
+
+/** Accept an incoming video call. */
+exports.acceptSession = asyncHandler(async (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) {
+    return res.status(400).json({ success: false, message: 'Video call ID is required' });
+  }
+
+  const result = await videoSessionService.acceptSession(
+    sessionId,
+    req.userId,
+    req.user?.name || req.user?.email || 'User'
+  );
+
+  return sendSuccess(res, 'Video call accepted', {
+    sessionId: result.session._id,
+    streamToken: result.streamToken,
+    streamCallId: result.streamCallId,
+    session: result.session
+  });
 });
 
 /**
@@ -60,4 +84,10 @@ exports.getByAppointment = asyncHandler(async (req, res) => {
     streamCallId: result.streamCallId,
     session: result.session
   });
+});
+
+/** List calls currently ringing for the authenticated user. */
+exports.getIncoming = asyncHandler(async (req, res) => {
+  const sessions = await videoSessionService.getIncomingSessions(req.userId);
+  return sendSuccess(res, 'OK', { sessions });
 });

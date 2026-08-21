@@ -18,7 +18,7 @@ exports.sendMessage = asyncHandler(async (req, res) => {
  * Get messages for conversation
  */
 exports.getMessages = asyncHandler(async (req, res) => {
-  const result = await chatService.getMessages(req.params.conversationId, req.query);
+  const result = await chatService.getMessages(req.params.conversationId, req.userId, req.query);
   return sendSuccess(res, 'OK', result);
 });
 
@@ -28,7 +28,13 @@ exports.getMessages = asyncHandler(async (req, res) => {
 exports.getOrCreateConversation = asyncHandler(async (req, res) => {
   const { veterinarianId, petOwnerId, appointmentId } = req.body;
   const adminId = req.userRole === 'ADMIN' ? req.userId : req.body.adminId;
-  const result = await chatService.getOrCreateConversation(veterinarianId, petOwnerId, adminId, appointmentId);
+  const result = await chatService.getOrCreateConversation(
+    veterinarianId,
+    petOwnerId,
+    adminId,
+    appointmentId,
+    req.userId
+  );
   return sendSuccess(res, 'OK', result);
 });
 
@@ -54,4 +60,13 @@ exports.markMessagesAsRead = asyncHandler(async (req, res) => {
 exports.getUnreadCount = asyncHandler(async (req, res) => {
   const result = await chatService.getUnreadCount(req.userId, req.userRole);
   return sendSuccess(res, 'OK', { unreadCount: result });
+});
+
+/**
+ * Mark conversation as completed (Veterinarian only)
+ */
+exports.markConversationComplete = asyncHandler(async (req, res) => {
+  const { conversationId } = req.params;
+  const result = await chatService.markConversationComplete(conversationId, req.userId);
+  return sendSuccess(res, 'Conversation marked as completed', result);
 });

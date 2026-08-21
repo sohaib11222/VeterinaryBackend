@@ -192,24 +192,24 @@ const uploadSingleChatFile = (folderName) => {
             return sendError(
               res,
               'File too large',
-              [{ message: 'File size must be less than 50MB' }],
-              HTTP_STATUS.BAD_REQUEST
+              HTTP_STATUS.BAD_REQUEST,
+              [{ message: 'File size must be less than 50MB' }]
             );
           }
-          return sendError(
-            res,
-            'Upload error',
-            [{ message: err.message }],
-            HTTP_STATUS.BAD_REQUEST
-          );
+            return sendError(
+              res,
+              'Upload error',
+              HTTP_STATUS.BAD_REQUEST,
+              [{ message: err.message }]
+            );
         }
         
         // File filter error
         return sendError(
           res,
           'Invalid file',
-          [{ message: err.message }],
-          HTTP_STATUS.BAD_REQUEST
+          HTTP_STATUS.BAD_REQUEST,
+          [{ message: err.message }]
         );
       }
 
@@ -217,8 +217,8 @@ const uploadSingleChatFile = (folderName) => {
         return sendError(
           res,
           'No file uploaded',
-          [{ message: 'Please select a file to upload' }],
-          HTTP_STATUS.BAD_REQUEST
+          HTTP_STATUS.BAD_REQUEST,
+          [{ message: 'Please select a file to upload' }]
         );
       }
 
@@ -258,32 +258,32 @@ const uploadMultipleChatFiles = (folderName, maxCount = 10) => {
             return sendError(
               res,
               'File too large',
-              [{ message: 'Each file size must be less than 50MB' }],
-              HTTP_STATUS.BAD_REQUEST
+              HTTP_STATUS.BAD_REQUEST,
+              [{ message: 'Each file size must be less than 50MB' }]
             );
           }
           if (err.code === 'LIMIT_FILE_COUNT') {
             return sendError(
               res,
               'Too many files',
-              [{ message: `Maximum ${maxCount} files allowed` }],
-              HTTP_STATUS.BAD_REQUEST
+              HTTP_STATUS.BAD_REQUEST,
+              [{ message: `Maximum ${maxCount} files allowed` }]
             );
           }
-          return sendError(
-            res,
-            'Upload error',
-            [{ message: err.message }],
-            HTTP_STATUS.BAD_REQUEST
-          );
+            return sendError(
+              res,
+              'Upload error',
+              HTTP_STATUS.BAD_REQUEST,
+              [{ message: err.message }]
+            );
         }
         
         // File filter error
         return sendError(
           res,
           'Invalid file',
-          [{ message: err.message }],
-          HTTP_STATUS.BAD_REQUEST
+          HTTP_STATUS.BAD_REQUEST,
+          [{ message: err.message }]
         );
       }
 
@@ -291,8 +291,8 @@ const uploadMultipleChatFiles = (folderName, maxCount = 10) => {
         return sendError(
           res,
           'No files uploaded',
-          [{ message: 'Please select at least one file to upload' }],
-          HTTP_STATUS.BAD_REQUEST
+          HTTP_STATUS.BAD_REQUEST,
+          [{ message: 'Please select at least one file to upload' }]
         );
       }
 

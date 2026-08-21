@@ -26,6 +26,27 @@ const conversationSchema = new mongoose.Schema({
     enum: ['VETERINARIAN_PET_OWNER', 'ADMIN_VETERINARIAN'],
     default: 'VETERINARIAN_PET_OWNER'
   },
+  status: {
+    type: String,
+    enum: ['ACTIVE', 'COMPLETED'],
+    default: 'ACTIVE'
+  },
+  completedAt: {
+    type: Date,
+    default: null
+  },
+  completedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  // Legacy appointment-specific conversations are retained for audit/history
+  // after their messages have been consolidated into the relationship chat.
+  mergedInto: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Conversation',
+    default: null
+  },
   lastMessage: {
     message: { type: String, default: null },
     sentAt: { type: Date, default: null },
@@ -46,6 +67,7 @@ const conversationSchema = new mongoose.Schema({
 
 // Indexes
 conversationSchema.index({ veterinarianId: 1, petOwnerId: 1 });
+conversationSchema.index({ veterinarianId: 1, petOwnerId: 1, conversationType: 1, mergedInto: 1, lastMessageAt: -1 });
 conversationSchema.index({ appointmentId: 1 });
 conversationSchema.index({ lastMessageAt: -1 });
 
