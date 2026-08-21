@@ -15,6 +15,11 @@ const calculateNetAmount = (amount, platformFeePercent = 0) => {
   return { netAmount, platformFee };
 };
 
+// Monetary values are persisted as numbers in the existing schema. Round each
+// withdrawal calculation to cents so the request, wallet balance, and audit
+// record always agree.
+const roundCurrency = (amount) => Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
+
 /**
  * Credit balance to user (internal helper)
  * @param {string} userId - User ID
@@ -263,22 +268,23 @@ const approveWithdrawal = async (requestId, adminId, withdrawalFeePercent = null
   }
 
   const user = request.userId;
-  const withdrawalAmount = request.amount;
+  const withdrawalAmount = roundCurrency(request.amount);
 
   // Validate fee percentage if provided
   if (withdrawalFeePercent !== null) {
-    if (withdrawalFeePercent < 0 || withdrawalFeePercent > 100) {
+    if (!Number.isFinite(Number(withdrawalFeePercent)) || withdrawalFeePercent < 0 || withdrawalFeePercent > 100) {
       throw new Error('Withdrawal fee percentage must be between 0 and 100');
     }
   }
 
-  // Calculate fee and totals
-  const feePercent = withdrawalFeePercent !== null ? withdrawalFeePercent : 0;
-  const withdrawalFeeAmount = (withdrawalAmount * feePercent) / 100;
-  const totalDeducted = withdrawalAmount + withdrawalFeeAmount;
-  const netAmount = withdrawalAmount; // Veterinarian receives the original amount
+  // A withdrawal fee is withheld from the requested payout. It must never be
+  // charged a second time to the veterinarian's wallet.
+  const feePercent = withdrawalFeePercent !== null ? Number(withdrawalFeePercent) : 0;
+  const withdrawalFeeAmount = roundCurrency((withdrawalAmount * feePercent) / 100);
+  const totalDeducted = withdrawalAmount;
+  const netAmount = roundCurrency(withdrawalAmount - withdrawalFeeAmount);
 
-  // Check if user has sufficient balance (must cover amount + fee)
+  // The wallet only needs to cover the original requested amount.
   if ((user.balance || 0) < totalDeducted) {
     request.status = 'REJECTED';
     request.rejectionReason = `Insufficient balance. Required: ${totalDeducted.toFixed(2)}, Available: ${(user.balance || 0).toFixed(2)}`;
@@ -286,8 +292,8 @@ const approveWithdrawal = async (requestId, adminId, withdrawalFeePercent = null
     throw new Error(`Insufficient balance. Required: $${totalDeducted.toFixed(2)}, Available: $${(user.balance || 0).toFixed(2)}`);
   }
 
-  // Deduct total amount (withdrawal + fee) from balance
-  user.balance = (user.balance || 0) - totalDeducted;
+  // Debit the requested amount once. The payout provider receives netAmount.
+  user.balance = roundCurrency((user.balance || 0) - totalDeducted);
   await user.save();
 
   // Update request with fee information
@@ -303,7 +309,7 @@ const approveWithdrawal = async (requestId, adminId, withdrawalFeePercent = null
   // Create transaction record for the withdrawal
   await Transaction.create({
     userId: user._id,
-    amount: -totalDeducted, // Negative for withdrawal (includes fee)
+    amount: -totalDeducted,
     currency: 'EUR',
     status: 'SUCCESS',
     provider: 'WITHDRAWAL',
@@ -317,30 +323,10 @@ const approveWithdrawal = async (requestId, adminId, withdrawalFeePercent = null
       withdrawalFeeAmount: withdrawalFeeAmount,
       totalDeducted: totalDeducted,
       netAmount: netAmount,
+      feeDeductedFromPayout: true,
       timestamp: new Date()
     }
   });
-
-  // Create separate transaction record for the fee (optional, for tracking)
-  if (withdrawalFeeAmount > 0) {
-    await Transaction.create({
-      userId: user._id,
-      amount: -withdrawalFeeAmount, // Negative for fee deduction
-      currency: 'EUR',
-      status: 'SUCCESS',
-      provider: 'WITHDRAWAL_FEE',
-      providerReference: `WITHDRAW-FEE-${Date.now()}-${user._id}`,
-      metadata: {
-        type: 'WITHDRAWAL_FEE',
-        requestId: request._id,
-        adminId,
-        withdrawalAmount: withdrawalAmount,
-        withdrawalFeePercent: feePercent,
-        withdrawalFeeAmount: withdrawalFeeAmount,
-        timestamp: new Date()
-      }
-    });
-  }
 
   return request;
 };

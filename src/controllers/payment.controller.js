@@ -7,11 +7,17 @@ const { sendSuccess } = require('../utils/response');
  */
 exports.processAppointmentPayment = asyncHandler(async (req, res) => {
   const { appointmentId, amount, paymentMethod } = req.body;
+  const requestedPaymentMethod = String(paymentMethod || 'STRIPE').trim().toUpperCase();
+  if (requestedPaymentMethod !== 'STRIPE') {
+    const error = new Error('Only Stripe payments are supported for appointments');
+    error.statusCode = 400;
+    throw error;
+  }
   const result = await paymentService.processAppointmentPayment(
     req.userId,
     appointmentId,
     amount,
-    paymentMethod || 'DUMMY'
+    'STRIPE'
   );
   return sendSuccess(res, 'Payment processed successfully', result);
 });

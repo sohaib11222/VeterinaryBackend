@@ -55,12 +55,12 @@ const withdrawalRequestSchema = new mongoose.Schema({
   },
   totalDeducted: {
     type: Number,
-    default: null, // Calculated: amount + withdrawalFeeAmount
+    default: null, // The original requested amount debited from the wallet
     min: 0
   },
   netAmount: {
     type: Number,
-    default: null, // Same as amount (what user receives)
+    default: null, // Calculated: amount - withdrawalFeeAmount (what user receives)
     min: 0
   }
 }, {

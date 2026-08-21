@@ -15,6 +15,17 @@ const { VETERINARY_SPECIALIZATION } = require('../types/enums');
 const { validateObjectId } = require('../utils/validation');
 
 const hasText = (value) => typeof value === 'string' && value.trim().length > 0;
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normalizeSpecializationCode = (value) => String(value || '')
+  .trim()
+  .toUpperCase()
+  .replace(/[^A-Z0-9]+/g, '_')
+  .replace(/^_+|_+$/g, '');
+const toPositiveInteger = (value, fallback, max) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, max);
+};
 
 /**
  * Keep onboarding based on the actual profile data instead of trusting an
@@ -232,14 +243,20 @@ const listVeterinarians = async (filter = {}) => {
   } = filter;
 
   const query = {};
+  const currentPage = toPositiveInteger(page, 1, Number.MAX_SAFE_INTEGER);
+  const pageSize = toPositiveInteger(limit, 10, 100);
 
   if (specialization) {
     const specVal = typeof specialization === 'string' ? specialization.trim() : String(specialization || '').trim();
-    if (specVal) query.specializations = { $in: [specVal] };
+    const normalizedSpecVal = normalizeSpecializationCode(specVal);
+    const specializationValues = [...new Set([specVal, normalizedSpecVal].filter(Boolean))];
+    if (specializationValues.length > 0) {
+      query.specializations = { $in: specializationValues };
+    }
   }
 
-  if (city) {
-    query['clinics.city'] = { $regex: city, $options: 'i' };
+  if (hasText(city)) {
+    query['clinics.city'] = { $regex: escapeRegExp(city.trim()), $options: 'i' };
   }
 
   if (isFeatured !== undefined) {
@@ -256,26 +273,25 @@ const listVeterinarians = async (filter = {}) => {
     role: 'VETERINARIAN',
     status: 'APPROVED'
   })
-    .select('_id name')
+    .select('_id name fullName email')
     .lean()
     .maxTimeMS(2000);
 
   approvedVeterinarianIds = approvedVeterinarians.map(vet => vet._id);
 
-  // Optional: filter by search (name)
+  // Keep an explicit empty match set. Previously a failed search returned every
+  // approved veterinarian because the user-id filter was left unchanged.
   if (search && typeof search === 'string' && search.trim()) {
-    const searchRegex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const searchRegex = new RegExp(escapeRegExp(search.trim()), 'i');
     const matchingIds = approvedVeterinarians
-      .filter(v => v.name && searchRegex.test(v.name))
+      .filter((v) => [v.name, v.fullName, v.email].some((value) => value && searchRegex.test(value)))
       .map(v => v._id);
-    if (matchingIds.length > 0) {
-      approvedVeterinarianIds = matchingIds;
-    }
+    approvedVeterinarianIds = matchingIds;
   }
 
   query.userId = { $in: approvedVeterinarianIds };
 
-  const skip = (page - 1) * limit;
+  const skip = (currentPage - 1) * pageSize;
 
   // Same profile fields as getVeterinarianProfile (parity with doctor profile: ratingAvg, isVerified, isFeatured, canSellProducts, convenzionato, timestamps, etc.)
   const profileSelect = [
@@ -309,7 +325,7 @@ const listVeterinarians = async (filter = {}) => {
     VeterinarianProfile.find(query)
       .select(profileSelect)
       .skip(skip)
-      .limit(limit)
+      .limit(pageSize)
       .sort({ ratingAvg: -1, createdAt: -1 })
       .lean()
       .maxTimeMS(3000),
@@ -380,8 +396,8 @@ const listVeterinarians = async (filter = {}) => {
   return {
     veterinarians: veterinariansWithProducts,
     pagination: {
-      page,
-      limit,
+      page: currentPage,
+      limit: pageSize,
       total,
       pages: Math.ceil(Math.max(0, total) / limit)
     }

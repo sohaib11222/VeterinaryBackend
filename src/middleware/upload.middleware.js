@@ -185,7 +185,12 @@ const uploadSingleChatFile = (folderName) => {
   });
 
   return (req, res, next) => {
-    upload.single('file')(req, res, (err) => {
+    // Keep the existing Doctor client (`file`) and the Admin client (`chat`)
+    // compatible with the same chat upload endpoint.
+    const acceptedFields = folderName === 'file'
+      ? [{ name: 'file', maxCount: 1 }]
+      : [{ name: 'file', maxCount: 1 }, { name: folderName, maxCount: 1 }];
+    upload.fields(acceptedFields)(req, res, (err) => {
       if (err) {
         if (err instanceof multer.MulterError) {
           if (err.code === 'LIMIT_FILE_SIZE') {
@@ -213,6 +218,8 @@ const uploadSingleChatFile = (folderName) => {
         );
       }
 
+      const uploadedFiles = req.files || {};
+      req.file = uploadedFiles.file?.[0] || uploadedFiles[folderName]?.[0] || null;
       if (!req.file) {
         return sendError(
           res,
@@ -251,7 +258,10 @@ const uploadMultipleChatFiles = (folderName, maxCount = 10) => {
   });
 
   return (req, res, next) => {
-    upload.array('files', maxCount)(req, res, (err) => {
+    const acceptedFields = folderName === 'files'
+      ? [{ name: 'files', maxCount }]
+      : [{ name: 'files', maxCount }, { name: folderName, maxCount }];
+    upload.fields(acceptedFields)(req, res, (err) => {
       if (err) {
         if (err instanceof multer.MulterError) {
           if (err.code === 'LIMIT_FILE_SIZE') {
@@ -287,6 +297,8 @@ const uploadMultipleChatFiles = (folderName, maxCount = 10) => {
         );
       }
 
+      const uploadedFiles = req.files || {};
+      req.files = [...(uploadedFiles.files || []), ...(uploadedFiles[folderName] || [])];
       if (!req.files || req.files.length === 0) {
         return sendError(
           res,

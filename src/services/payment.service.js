@@ -14,7 +14,14 @@ const balanceService = require('./balance.service');
  * @param {string} paymentMethod - Payment method
  * @returns {Promise<Object>} Transaction
  */
-const processAppointmentPayment = async (userId, appointmentId, amount, paymentMethod = 'DUMMY') => {
+const processAppointmentPayment = async (userId, appointmentId, amount, paymentMethod = 'STRIPE') => {
+  const normalizedPaymentMethod = String(paymentMethod || 'STRIPE').trim().toUpperCase();
+  if (normalizedPaymentMethod !== 'STRIPE') {
+    const error = new Error('Only Stripe payments are supported for appointments');
+    error.statusCode = 400;
+    throw error;
+  }
+
   const appointment = await Appointment.findById(appointmentId);
   
   if (!appointment) {
@@ -33,13 +40,13 @@ const processAppointmentPayment = async (userId, appointmentId, amount, paymentM
     currency: 'EUR',
     relatedAppointmentId: appointmentId,
     status: 'SUCCESS',
-    provider: paymentMethod,
+    provider: normalizedPaymentMethod,
     providerReference: `APT-${Date.now()}`
   });
 
   // Update appointment payment status
   appointment.paymentStatus = 'PAID';
-  appointment.paymentMethod = paymentMethod;
+  appointment.paymentMethod = normalizedPaymentMethod;
   await appointment.save();
 
   // Credit veterinarian balance (idempotent)
