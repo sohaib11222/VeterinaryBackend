@@ -11,6 +11,14 @@ const isE164Phone = (phone) => {
   return /^\+\d{7,15}$/.test(t);
 };
 
+const PHONE_VERIFICATION_ROLES = [
+  USER_ROLES.VETERINARIAN,
+  USER_ROLES.PET_STORE,
+  USER_ROLES.PARAPHARMACY,
+];
+
+const requiresPhoneVerification = (role) => PHONE_VERIFICATION_ROLES.includes(String(role || '').toUpperCase());
+
 /**
  * Register new user
  */
@@ -29,13 +37,14 @@ const register = async (data) => {
   const normalizedRole = String(role || USER_ROLES.PET_OWNER).toUpperCase();
   const isPetStore = normalizedRole === USER_ROLES.PET_STORE;
   const isParapharmacy = normalizedRole === USER_ROLES.PARAPHARMACY;
+  const isVeterinarian = normalizedRole === USER_ROLES.VETERINARIAN;
 
   let status = USER_STATUS.APPROVED;
   if ([USER_ROLES.VETERINARIAN, USER_ROLES.PET_STORE, USER_ROLES.PARAPHARMACY].includes(normalizedRole)) {
     status = USER_STATUS.PENDING;
   }
 
-  if ((isPetStore || isParapharmacy) && !isE164Phone(phone)) {
+  if (requiresPhoneVerification(normalizedRole) && !isE164Phone(phone)) {
     throw new Error('Phone number must be in international format (E.164), e.g. +1234567890');
   }
 
@@ -49,7 +58,7 @@ const register = async (data) => {
     isPhoneVerified: false,
   });
 
-  if (isPetStore || isParapharmacy) {
+  if (requiresPhoneVerification(normalizedRole)) {
     try {
       await sendPhoneOtp(String(user.phone).trim());
     } catch (error) {
@@ -59,7 +68,7 @@ const register = async (data) => {
   }
 
   // Create veterinarian profile if role is VETERINARIAN
-  if (normalizedRole === USER_ROLES.VETERINARIAN) {
+  if (isVeterinarian) {
     const veterinarianProfile = await VeterinarianProfile.create({
       userId: user._id
     });
@@ -102,8 +111,8 @@ const sendPhoneOtpForUser = async (userId, phone = null) => {
     throw new Error('User not found');
   }
 
-  if (![USER_ROLES.PET_STORE, USER_ROLES.PARAPHARMACY].includes(user.role)) {
-    throw new Error('Phone verification is only available for pharmacy accounts');
+  if (!requiresPhoneVerification(user.role)) {
+    throw new Error('Phone verification is not available for this account');
   }
 
   const targetPhone = String(phone || user.phone || '').trim();
@@ -128,8 +137,8 @@ const verifyPhoneOtpForUser = async (userId, code, phone = null) => {
     throw new Error('User not found');
   }
 
-  if (![USER_ROLES.PET_STORE, USER_ROLES.PARAPHARMACY].includes(user.role)) {
-    throw new Error('Phone verification is only available for pharmacy accounts');
+  if (!requiresPhoneVerification(user.role)) {
+    throw new Error('Phone verification is not available for this account');
   }
 
   const targetPhone = String(phone || user.phone || '').trim();

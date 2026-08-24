@@ -5,6 +5,16 @@ const uploadController = require('../controllers/upload.controller');
 const { authGuard } = require('../middleware/authGuard');
 const asyncHandler = require('../middleware/asyncHandler');
 
+const requireVerifiedVeterinarianPhone = (req, res, next) => {
+  if (!req.user?.isPhoneVerified) {
+    return res.status(403).json({
+      success: false,
+      message: 'Verify your phone number before uploading verification documents',
+    });
+  }
+  return next();
+};
+
 /**
  * @route   GET /api/upload/files
  * @desc    List uploaded files (for selecting existing images)
@@ -36,6 +46,7 @@ router.post(
 router.post(
   '/veterinarian-docs',
   authGuard(['VETERINARIAN']),
+  requireVerifiedVeterinarianPhone,
   uploadMultipleImages('veterinarianDocs', 5),
   asyncHandler(uploadController.uploadMultipleFiles)
 );

@@ -15,8 +15,8 @@ router.post('/reset-password', asyncHandler(authController.resetPassword));
 router.post('/change-password', authGuard(), asyncHandler(authController.changePassword));
 router.post('/refresh-token', asyncHandler(authController.refreshToken));
 
-router.post('/phone-otp/send', authGuard(['PET_STORE', 'PARAPHARMACY']), asyncHandler(authController.sendPhoneOtp));
-router.post('/phone-otp/verify', authGuard(['PET_STORE', 'PARAPHARMACY']), asyncHandler(authController.verifyPhoneOtp));
+router.post('/phone-otp/send', authGuard(['VETERINARIAN', 'PET_STORE', 'PARAPHARMACY']), asyncHandler(authController.sendPhoneOtp));
+router.post('/phone-otp/verify', authGuard(['VETERINARIAN', 'PET_STORE', 'PARAPHARMACY']), asyncHandler(authController.verifyPhoneOtp));
 
 // Admin routes - authGuard(['ADMIN']) both authenticates and enforces role
 router.post('/approve-veterinarian', authGuard(['ADMIN']), asyncHandler(authController.approveVeterinarian));

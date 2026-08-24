@@ -21,10 +21,68 @@ const normalizeSpecializationCode = (value) => String(value || '')
   .toUpperCase()
   .replace(/[^A-Z0-9]+/g, '_')
   .replace(/^_+|_+$/g, '');
+const SPECIALIZATION_ALIASES = {
+  SMALL_ANIMAL: ['SMALL_ANIMAL', 'SMALL_ANIMALS', 'PICCOLI_ANIMALI'],
+  LARGE_ANIMAL: ['LARGE_ANIMAL', 'LARGE_ANIMALS', 'GRANDI_ANIMALI'],
+  EXOTIC_ANIMALS: ['EXOTIC_ANIMALS', 'ANIMALI_ESOTICI'],
+  AVIAN: ['AVIAN', 'BIRDS', 'UCCELLI'],
+  REPTILE: ['REPTILE', 'REPTILES', 'RETTILI'],
+  EMERGENCY: ['EMERGENCY', 'EMERGENZA'],
+  SURGERY: ['SURGERY', 'SURGICAL', 'SURGEON', 'CHIRURGIA', 'CHIRURGO'],
+  DERMATOLOGY: ['DERMATOLOGY', 'DERMATOLOGIA'],
+  CARDIOLOGY: ['CARDIOLOGY', 'CARDIOLOGIA'],
+  ONCOLOGY: ['ONCOLOGY', 'ONCOLOGIA'],
+  DENTISTRY: ['DENTISTRY', 'DENTAL', 'ODONTOIATRIA'],
+  OPHTHALMOLOGY: ['OPHTHALMOLOGY', 'OFTALMOLOGIA'],
+  BEHAVIOR: ['BEHAVIOR', 'BEHAVIOUR', 'COMPORTAMENTO'],
+  NUTRITION: ['NUTRITION', 'NUTRIZIONE'],
+  INTERNAL_MEDICINE: ['INTERNAL_MEDICINE', 'INTERNAL_MEDICINE_SMALL_ANIMALS', 'SMALL_ANIMAL_INTERNAL_MEDICINE', 'MEDICINA_INTERNA', 'MEDICINA_INTERNA_DEI_PICCOLI_ANIMALI'],
+  RADIOLOGY: ['RADIOLOGY', 'RADIOLOGIA'],
+};
+const resolveSpecializationCode = (...values) => {
+  const normalizedValues = values.flat().map(normalizeSpecializationCode).filter(Boolean);
+  const directCode = normalizedValues.find((value) => Object.values(VETERINARY_SPECIALIZATION).includes(value));
+  if (directCode) return directCode;
+  return Object.entries(SPECIALIZATION_ALIASES).find(([, aliases]) => (
+    aliases.some((alias) => normalizedValues.includes(alias))
+  ))?.[0] || normalizedValues[0] || '';
+};
 const toPositiveInteger = (value, fallback, max) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
   return Math.min(parsed, max);
+};
+
+const getSpecializationFilterValues = async (specialization) => {
+  const rawValue = String(specialization || '').trim();
+  if (!rawValue) return [];
+
+  const normalizedValue = normalizeSpecializationCode(rawValue);
+  const exactValue = new RegExp(`^${escapeRegExp(rawValue)}$`, 'i');
+  const specializationRecords = await Specialization.find({
+    $or: [
+      { type: { $in: [rawValue, normalizedValue] } },
+      { name: exactValue },
+      { slug: exactValue },
+      ...(mongoose.isValidObjectId(rawValue) ? [{ _id: rawValue }] : []),
+    ],
+  })
+    .select('type name slug')
+    .lean()
+    .maxTimeMS(2000);
+
+  return [...new Set([
+    rawValue,
+    normalizedValue,
+    resolveSpecializationCode(rawValue),
+    ...specializationRecords.flatMap((record) => [
+      record.type,
+      normalizeSpecializationCode(record.type),
+      normalizeSpecializationCode(record.name),
+      normalizeSpecializationCode(record.slug),
+      resolveSpecializationCode(record.type, record.name, record.slug),
+    ]),
+  ].filter(Boolean))];
 };
 
 /**
@@ -247,9 +305,7 @@ const listVeterinarians = async (filter = {}) => {
   const pageSize = toPositiveInteger(limit, 10, 100);
 
   if (specialization) {
-    const specVal = typeof specialization === 'string' ? specialization.trim() : String(specialization || '').trim();
-    const normalizedSpecVal = normalizeSpecializationCode(specVal);
-    const specializationValues = [...new Set([specVal, normalizedSpecVal].filter(Boolean))];
+    const specializationValues = await getSpecializationFilterValues(specialization);
     if (specializationValues.length > 0) {
       query.specializations = { $in: specializationValues };
     }
@@ -399,7 +455,7 @@ const listVeterinarians = async (filter = {}) => {
       page: currentPage,
       limit: pageSize,
       total,
-      pages: Math.ceil(Math.max(0, total) / limit)
+      pages: Math.ceil(Math.max(0, total) / pageSize)
     }
   };
 };
