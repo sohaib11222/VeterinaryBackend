@@ -15,7 +15,6 @@ if (config.STREAM_API_KEY && config.STREAM_API_SECRET) {
       config.STREAM_API_SECRET
     );
     console.log('✅ Stream client initialized successfully');
-    console.log(`✅ Stream API key in use: ${config.STREAM_API_KEY}`);
   } catch (error) {
     console.error('❌ Failed to initialize Stream client:', error);
   }
@@ -54,8 +53,14 @@ const endCall = async (callId) => {
   // Frontend handles call ending
 };
 
+// Stream API keys are public identifiers. Returning this key alongside a
+// short-lived server token keeps the browser and backend on the same app
+// without exposing the API secret.
+const getPublicApiKey = () => config.STREAM_API_KEY || null;
+
 module.exports = {
   generateUserToken,
   createCall,
-  endCall
+  endCall,
+  getPublicApiKey
 };

@@ -2,6 +2,7 @@ const ProductPrescriptionRequest = require('../models/ProductPrescriptionRequest
 const Product = require('../models/Product');
 const PetStore = require('../models/PetStore');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const notificationService = require('./notification.service');
 const { validateObjectId } = require('../utils/validation');
 
@@ -33,6 +34,30 @@ const getPharmacyForProduct = async (product) => {
   if (!pharmacy || !pharmacy.ownerId) throw new Error('Pharmacy for this product is not available');
   if (pharmacy.isPublic === false) throw new Error('This pharmacy is not currently available');
   return pharmacy;
+};
+
+const ensureApprovalNotification = async (request, productName) => {
+  const prescriptionRequestId = request?._id?.toString?.() || String(request?._id || '');
+  if (!prescriptionRequestId) return;
+
+  const existing = await Notification.exists({
+    userId: request.petOwnerId,
+    type: 'PRESCRIPTION_APPROVED',
+    'data.prescriptionRequestId': prescriptionRequestId,
+  });
+  if (existing) return;
+
+  await notificationService.createNotification({
+    userId: request.petOwnerId,
+    title: 'Prescription approved',
+    body: `Your prescription for ${productName || 'this medicine'} has been approved. You can now purchase it.`,
+    type: 'PRESCRIPTION_APPROVED',
+    data: {
+      prescriptionRequestId,
+      productId: request.productId.toString(),
+      variantId: request.variantId?.toString() || null,
+    },
+  });
 };
 
 const submitRequest = async (petOwnerId, data) => {
@@ -75,13 +100,20 @@ const submitRequest = async (petOwnerId, data) => {
     mimeType: String(mimeType || '').trim() || null,
   });
 
-  await notificationService.createNotification({
-    userId: pharmacy.ownerId,
-    title: 'New prescription request',
-    body: `A customer submitted a prescription for ${product.name}.`,
-    type: 'PRESCRIPTION_REQUEST',
-    data: { prescriptionRequestId: request._id.toString(), productId: product._id.toString() },
-  });
+  try {
+    await notificationService.createNotification({
+      userId: pharmacy.ownerId,
+      title: 'New prescription request',
+      body: `A customer submitted a prescription for ${product.name}.`,
+      type: 'PRESCRIPTION_REQUEST',
+      data: { prescriptionRequestId: request._id.toString(), productId: product._id.toString() },
+    });
+  } catch (error) {
+    // The request is already safely stored and will appear in the Pharmacy's
+    // auto-refreshing queue, so notification delivery must not turn success
+    // into a false upload failure for the customer.
+    console.error('Unable to create Pharmacy prescription notification:', error.message);
+  }
 
   return request.toObject();
 };
@@ -101,6 +133,16 @@ const getEligibility = async (petOwnerId, productId, variantId) => {
     .sort({ createdAt: -1 })
     .lean()
     .maxTimeMS(2000);
+
+  if (request?.status === 'APPROVED') {
+    try {
+      // Backfill the one-time notification for approvals that completed
+      // before notification delivery was fixed.
+      await ensureApprovalNotification(request, product.name);
+    } catch (error) {
+      console.error('Unable to ensure prescription approval notification:', error.message);
+    }
+  }
 
   return {
     requiresPrescription: true,
@@ -195,15 +237,23 @@ const reviewRequest = async (pharmacyOwnerId, requestId, data) => {
 
   const product = await Product.findById(request.productId).select('name').lean().maxTimeMS(1000);
   const approved = status === 'APPROVED';
-  await notificationService.createNotification({
-    userId: request.petOwnerId,
-    title: approved ? 'Prescription approved' : 'Prescription needs attention',
-    body: approved
-      ? `Your prescription for ${product?.name || 'this medicine'} has been approved. You can now purchase it.`
-      : `Your prescription for ${product?.name || 'this medicine'} was not approved. ${request.reviewNotes || 'Please upload a new prescription and try again.'}`,
-    type: approved ? 'PRESCRIPTION_APPROVED' : 'PRESCRIPTION_REJECTED',
-    data: { prescriptionRequestId: request._id.toString(), productId: request.productId.toString(), variantId: request.variantId?.toString() || null },
-  });
+  try {
+    if (approved) {
+      await ensureApprovalNotification(request, product?.name);
+    } else {
+      await notificationService.createNotification({
+        userId: request.petOwnerId,
+        title: 'Prescription needs attention',
+        body: `Your prescription for ${product?.name || 'this medicine'} was not approved. ${request.reviewNotes || 'Please upload a new prescription and try again.'}`,
+        type: 'PRESCRIPTION_REJECTED',
+        data: { prescriptionRequestId: request._id.toString(), productId: request.productId.toString(), variantId: request.variantId?.toString() || null },
+      });
+    }
+  } catch (error) {
+    // Approval/rejection is already persisted. Retrying the client action
+    // should never be required merely because a notification is delayed.
+    console.error('Unable to create prescription review notification:', error.message);
+  }
 
   return request.toObject();
 };

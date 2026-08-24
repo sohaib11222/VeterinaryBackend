@@ -6,10 +6,9 @@ const mongoose = require('mongoose');
  * @returns {boolean} True if valid, false otherwise
  */
 const isValidObjectId = (id) => {
-  if (!id || typeof id !== 'string') {
-    return false;
-  }
-  return mongoose.Types.ObjectId.isValid(id);
+  // HTTP inputs are strings, but values coming from Mongoose queries are
+  // ObjectId instances. Both represent valid references in service code.
+  return Boolean(id) && mongoose.Types.ObjectId.isValid(id);
 };
 
 /**

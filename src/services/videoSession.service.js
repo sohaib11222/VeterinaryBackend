@@ -158,6 +158,7 @@ const getStreamCredentials = (session, userId, userName) => ({
   session,
   streamToken: streamService.generateUserToken(userId, userName),
   streamCallId: session.sessionId || session.callId,
+  streamApiKey: streamService.getPublicApiKey(),
 });
 
 const startSession = async (appointmentId, userId, userName, { restartActive = false } = {}) => {
