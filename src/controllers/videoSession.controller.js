@@ -7,6 +7,7 @@ const serializeSessionCredentials = (result) => ({
   streamToken: result.streamToken,
   streamCallId: result.streamCallId,
   streamApiKey: result.streamApiKey,
+  streamMembers: result.streamMembers,
   session: result.session,
 });
 

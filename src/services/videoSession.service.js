@@ -1,6 +1,7 @@
 const VideoSession = require('../models/VideoSession');
 const Appointment = require('../models/Appointment');
 const streamService = require('./stream.service');
+const { computeAppointmentWindow } = require('../utils/appointmentTime');
 
 const createHttpError = (message, statusCode = 400) => {
   const error = new Error(message);
@@ -9,102 +10,6 @@ const createHttpError = (message, statusCode = 400) => {
 };
 
 const getId = (value) => (value?._id || value)?.toString?.() || String(value || '');
-
-const getTimeZoneOffsetMinutes = (date, timeZone) => {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      hour12: false,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    }).formatToParts(date).reduce((acc, part) => {
-      if (part.type !== 'literal') acc[part.type] = part.value;
-      return acc;
-    }, {});
-
-    const asUTC = Date.UTC(
-      Number(parts.year),
-      Number(parts.month) - 1,
-      Number(parts.day),
-      Number(parts.hour),
-      Number(parts.minute),
-      Number(parts.second)
-    );
-    return (asUTC - date.getTime()) / 60000;
-  } catch {
-    return null;
-  }
-};
-
-const zonedDateTimeToUtcMs = ({ year, month, day, hour, minute }, timeZone) => {
-  const guess = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
-  const offset = getTimeZoneOffsetMinutes(new Date(guess), timeZone);
-  if (!Number.isFinite(offset)) return guess;
-
-  let utcMs = guess - offset * 60 * 1000;
-  const adjustedOffset = getTimeZoneOffsetMinutes(new Date(utcMs), timeZone);
-  if (Number.isFinite(adjustedOffset) && adjustedOffset !== offset) {
-    utcMs = guess - adjustedOffset * 60 * 1000;
-  }
-  return utcMs;
-};
-
-const computeAppointmentWindow = (appointment) => {
-  const appointmentDate = new Date(appointment.appointmentDate);
-  const baseYear = appointmentDate.getUTCFullYear();
-  const baseMonth = appointmentDate.getUTCMonth() + 1;
-  const baseDay = appointmentDate.getUTCDate();
-  const [startHours, startMinutes] = String(appointment.appointmentTime || '').split(':').map(Number);
-
-  if (!Number.isFinite(startHours) || !Number.isFinite(startMinutes)) {
-    throw createHttpError('Invalid appointment time');
-  }
-
-  const offset = Number.isFinite(appointment.timezoneOffset) ? appointment.timezoneOffset : null;
-  const timeZone = typeof appointment.timezone === 'string' && appointment.timezone.includes('/')
-    ? appointment.timezone
-    : 'Europe/Rome';
-
-  let start;
-  let dateParts = { year: baseYear, month: baseMonth, day: baseDay };
-  if (offset !== null) {
-    const dateInZone = new Date(appointmentDate.getTime() + offset * 60 * 1000);
-    dateParts = {
-      year: dateInZone.getUTCFullYear(),
-      month: dateInZone.getUTCMonth() + 1,
-      day: dateInZone.getUTCDate(),
-    };
-    start = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, startHours, startMinutes) - offset * 60 * 1000);
-  } else {
-    start = new Date(zonedDateTimeToUtcMs({ ...dateParts, hour: startHours, minute: startMinutes }, timeZone));
-  }
-
-  let end;
-  if (appointment.appointmentEndTime) {
-    const [endHours, endMinutes] = String(appointment.appointmentEndTime).split(':').map(Number);
-    if (Number.isFinite(endHours) && Number.isFinite(endMinutes)) {
-      const startsAfterEndsByDay = startHours * 60 + startMinutes - (endHours * 60 + endMinutes) > 12 * 60;
-      const endDate = startsAfterEndsByDay
-        ? new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day + 1))
-        : new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day));
-      const endParts = {
-        year: endDate.getUTCFullYear(),
-        month: endDate.getUTCMonth() + 1,
-        day: endDate.getUTCDate(),
-      };
-      end = offset !== null
-        ? new Date(Date.UTC(endParts.year, endParts.month - 1, endParts.day, endHours, endMinutes) - offset * 60 * 1000)
-        : new Date(zonedDateTimeToUtcMs({ ...endParts, hour: endHours, minute: endMinutes }, timeZone));
-    }
-  }
-
-  if (!end) end = new Date(start.getTime() + (appointment.appointmentDuration || 30) * 60 * 1000);
-  return { start, end };
-};
 
 const assertAppointmentWindow = (appointment) => {
   const { start, end } = computeAppointmentWindow(appointment);

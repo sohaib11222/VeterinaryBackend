@@ -26,14 +26,15 @@ exports.getMessages = asyncHandler(async (req, res) => {
  * Get or create conversation
  */
 exports.getOrCreateConversation = asyncHandler(async (req, res) => {
-  const { veterinarianId, petOwnerId, appointmentId } = req.body;
+  const { veterinarianId, petOwnerId, businessId, appointmentId } = req.body;
   const adminId = req.userRole === 'ADMIN' ? req.userId : req.body.adminId;
   const result = await chatService.getOrCreateConversation(
     veterinarianId,
     petOwnerId,
     adminId,
     appointmentId,
-    req.userId
+    req.userId,
+    businessId
   );
   return sendSuccess(res, 'OK', result);
 });

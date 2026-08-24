@@ -29,11 +29,11 @@ router.get(
 /**
  * @route   POST /api/upload/profile
  * @desc    Upload user profile image
- * @access  Private (Admin, Veterinarian, Pet Owner)
+ * @access  Private (Admin, Veterinarian, Pet Owner, Pharmacy, Parapharmacy)
  */
 router.post(
   '/profile',
-  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER']),
+  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_STORE', 'PARAPHARMACY']),
   uploadSingleImage('profile'),
   asyncHandler(uploadController.uploadSingleFile)
 );
@@ -121,11 +121,11 @@ router.post(
 /**
  * @route   POST /api/upload/general
  * @desc    Upload general images
- * @access  Private (Admin, Veterinarian, Pet Owner)
+ * @access  Private (Admin, Veterinarian, Pet Owner, Pharmacy, Parapharmacy)
  */
 router.post(
   '/general',
-  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER']),
+  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_STORE', 'PARAPHARMACY']),
   uploadSingleImage('general'),
   asyncHandler(uploadController.uploadSingleFile)
 );

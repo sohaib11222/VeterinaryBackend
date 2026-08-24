@@ -9,6 +9,11 @@ const WeeklySchedule = require('../models/WeeklySchedule');
 const vaccinationService = require('./vaccination.service');
 const weightRecordService = require('./weightRecord.service');
 const subscriptionPolicy = require('./subscriptionPolicy.service');
+const {
+  getAppointmentDateParts,
+  getTimeZoneOffsetMinutes,
+  isIanaTimeZone,
+} = require('../utils/appointmentTime');
 
 /**
  * Create appointment
@@ -71,13 +76,19 @@ const createAppointment = async (data) => {
     throw new Error('Pet not found or does not belong to you');
   }
 
+  // Store and query the calendar date as UTC midnight. The appointment clock
+  // is interpreted separately using the appointment's timezone when the chat
+  // or video session is opened, so server-local timezone never changes its day.
+  const dateParts = getAppointmentDateParts(appointmentDate);
+  const localMidnightDate = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, 0, 0, 0, 0));
+  const nextMidnightDate = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day + 1, 0, 0, 0, 0));
+
   // Check for double-booking
-  const appointmentDateTime = new Date(appointmentDate);
   const existingAppointment = await Appointment.findOne({
     veterinarianId,
     appointmentDate: {
-      $gte: new Date(appointmentDateTime.setHours(0, 0, 0, 0)),
-      $lt: new Date(appointmentDateTime.setHours(23, 59, 59, 999))
+      $gte: localMidnightDate,
+      $lt: nextMidnightDate
     },
     appointmentTime,
     status: { $in: ['PENDING', 'CONFIRMED'] }
@@ -96,38 +107,15 @@ const createAppointment = async (data) => {
     }
   }
 
-  // Calculate appointment end time
-  let year, month, day;
-  if (appointmentDate instanceof Date) {
-    year = appointmentDate.getFullYear();
-    month = appointmentDate.getMonth();
-    day = appointmentDate.getDate();
-  } else {
-    const dateStr = appointmentDate.toString();
-    let dateOnly;
-    if (dateStr.includes('T')) {
-      dateOnly = dateStr.split('T')[0];
-    } else if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      dateOnly = dateStr;
-    } else {
-      const dateObj = new Date(appointmentDate);
-      year = dateObj.getFullYear();
-      month = dateObj.getMonth();
-      day = dateObj.getDate();
-      dateOnly = null;
-    }
-    
-    if (dateOnly) {
-      [year, month, day] = dateOnly.split('-').map(Number);
-      month = month - 1;
-    }
-  }
-  
-  const localMidnightDate = new Date(year, month, day, 0, 0, 0, 0);
+  // Calculate the local end-clock value without relying on the Node process
+  // timezone. This also supports slots that cross midnight.
   const [hours, minutes] = appointmentTime.split(':').map(Number);
-  const appointmentStartDateTime = new Date(year, month, day, hours, minutes, 0, 0);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) {
+    throw new Error('Invalid appointment time');
+  }
+  const appointmentStartDateTime = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, hours, minutes, 0, 0));
   const appointmentEndDateTime = new Date(appointmentStartDateTime.getTime() + duration * 60 * 1000);
-  const appointmentEndTime = `${appointmentEndDateTime.getHours().toString().padStart(2, '0')}:${appointmentEndDateTime.getMinutes().toString().padStart(2, '0')}`;
+  const appointmentEndTime = `${appointmentEndDateTime.getUTCHours().toString().padStart(2, '0')}:${appointmentEndDateTime.getUTCMinutes().toString().padStart(2, '0')}`;
 
   // Generate video call link if online booking
   let videoCallLink = null;
@@ -136,21 +124,18 @@ const createAppointment = async (data) => {
     videoCallLink = `https://videocall.veterinary.com/${appointmentNumber}`;
   }
 
-  // Calculate timezone offset
-  let tzOffset = timezoneOffset;
-  if (!tzOffset && timezone) {
-    const tzMatch = timezone.match(/UTC([+-])(\d+)/);
-    if (tzMatch) {
-      const sign = tzMatch[1] === '+' ? 1 : -1;
-      const hours = parseInt(tzMatch[2], 10);
-      tzOffset = sign * hours * 60;
-    }
-  }
-  
-  if (!tzOffset) {
-    const testDate = new Date();
-    tzOffset = -testDate.getTimezoneOffset();
-  }
+  // Preserve the IANA zone for DST-aware video/chat eligibility. The numeric
+  // offset is retained as a legacy fallback and uses positive minutes east of
+  // UTC, matching the booking UI's `-Date#getTimezoneOffset()` value.
+  const normalizedTimezone = isIanaTimeZone(timezone) ? timezone : 'Europe/Rome';
+  const requestedOffset = Number(timezoneOffset);
+  const scheduledNoon = new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, 12, 0, 0, 0));
+  const fallbackOffset = getTimeZoneOffsetMinutes(scheduledNoon, normalizedTimezone);
+  const tzOffset = Number.isFinite(requestedOffset)
+    ? requestedOffset
+    : Number.isFinite(fallbackOffset)
+      ? fallbackOffset
+      : 0;
 
   // Create appointment
   const appointment = await Appointment.create({
@@ -161,8 +146,8 @@ const createAppointment = async (data) => {
     appointmentTime,
     appointmentDuration: duration,
     appointmentEndTime,
-    timezone: timezone || null,
-    timezoneOffset: tzOffset || null,
+    timezone: normalizedTimezone,
+    timezoneOffset: tzOffset,
     bookingType: bookingType || 'VISIT',
     reason,
     petSymptoms,

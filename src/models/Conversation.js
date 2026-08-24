@@ -16,6 +16,15 @@ const conversationSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  // Pharmacy and Parapharmacy accounts are User records just like
+  // veterinarians.  Keeping their admin conversations on the shared
+  // conversation model preserves the same history, read receipts, and file
+  // attachment behaviour without overloading veterinarianId.
+  businessId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
   appointmentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Appointment',
@@ -23,7 +32,12 @@ const conversationSchema = new mongoose.Schema({
   },
   conversationType: {
     type: String,
-    enum: ['VETERINARIAN_PET_OWNER', 'ADMIN_VETERINARIAN'],
+    enum: [
+      'VETERINARIAN_PET_OWNER',
+      'ADMIN_VETERINARIAN',
+      'ADMIN_PET_STORE',
+      'ADMIN_PARAPHARMACY'
+    ],
     default: 'VETERINARIAN_PET_OWNER'
   },
   status: {
@@ -68,6 +82,7 @@ const conversationSchema = new mongoose.Schema({
 // Indexes
 conversationSchema.index({ veterinarianId: 1, petOwnerId: 1 });
 conversationSchema.index({ veterinarianId: 1, petOwnerId: 1, conversationType: 1, mergedInto: 1, lastMessageAt: -1 });
+conversationSchema.index({ adminId: 1, businessId: 1, conversationType: 1 });
 conversationSchema.index({ appointmentId: 1 });
 conversationSchema.index({ lastMessageAt: -1 });
 

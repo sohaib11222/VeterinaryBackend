@@ -5,93 +5,17 @@ const Appointment = require('../models/Appointment');
 const Notification = require('../models/Notification');
 const mongoose = require('mongoose');
 const subscriptionPolicy = require('./subscriptionPolicy.service');
+const { getAppointmentStart } = require('../utils/appointmentTime');
 
-const getTimeZoneOffsetMinutes = (date, timeZone) => {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      hour12: false,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    }).formatToParts(date).reduce((result, part) => {
-      if (part.type !== 'literal') result[part.type] = part.value;
-      return result;
-    }, {});
-
-    return (Date.UTC(
-      Number(parts.year),
-      Number(parts.month) - 1,
-      Number(parts.day),
-      Number(parts.hour),
-      Number(parts.minute),
-      Number(parts.second)
-    ) - date.getTime()) / 60000;
-  } catch {
-    return null;
-  }
+const ADMIN_SUPPORT_CONVERSATION_TYPES = {
+  VETERINARIAN: 'ADMIN_VETERINARIAN',
+  PET_STORE: 'ADMIN_PET_STORE',
+  PARAPHARMACY: 'ADMIN_PARAPHARMACY',
 };
 
-const zonedDateTimeToUtcMs = ({ year, month, day, hour, minute }, timeZone) => {
-  const guess = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
-  const initialOffset = getTimeZoneOffsetMinutes(new Date(guess), timeZone);
-  if (!Number.isFinite(initialOffset)) return guess;
+const ALL_ADMIN_SUPPORT_CONVERSATION_TYPES = Object.values(ADMIN_SUPPORT_CONVERSATION_TYPES);
 
-  let utcMs = guess - initialOffset * 60 * 1000;
-  const adjustedOffset = getTimeZoneOffsetMinutes(new Date(utcMs), timeZone);
-  if (Number.isFinite(adjustedOffset) && adjustedOffset !== initialOffset) {
-    utcMs = guess - adjustedOffset * 60 * 1000;
-  }
-  return utcMs;
-};
-
-/**
- * Build the UTC start date/time for an appointment.  appointmentDate is stored
- * separately from appointmentTime, so its recorded timezone must be taken into
- * account. This matches the appointment's video-session time conversion.
- */
-const getAppointmentStart = (appointment) => {
-  const appointmentDateUTC = appointment.appointmentDate instanceof Date
-    ? appointment.appointmentDate
-    : new Date(appointment.appointmentDate);
-
-  if (Number.isNaN(appointmentDateUTC.getTime())) {
-    throw new Error('Invalid appointment date');
-  }
-
-  const baseYear = appointmentDateUTC.getUTCFullYear();
-  const baseMonth = appointmentDateUTC.getUTCMonth() + 1;
-  const baseDay = appointmentDateUTC.getUTCDate();
-
-  const [startHours, startMinutes] = String(appointment.appointmentTime || '').split(':').map(Number);
-  if (!Number.isFinite(startHours) || !Number.isFinite(startMinutes)) {
-    throw new Error('Invalid appointment time');
-  }
-
-  const tzOffsetMinutes =
-    typeof appointment.timezoneOffset === 'number' && Number.isFinite(appointment.timezoneOffset)
-      ? appointment.timezoneOffset
-      : null;
-
-  if (tzOffsetMinutes !== null) {
-    const appointmentDateInTz = new Date(appointmentDateUTC.getTime() + tzOffsetMinutes * 60 * 1000);
-    const year = appointmentDateInTz.getUTCFullYear();
-    const month = appointmentDateInTz.getUTCMonth();
-    const day = appointmentDateInTz.getUTCDate();
-    const appointmentStartDateTimeUTC = new Date(Date.UTC(year, month, day, startHours, startMinutes, 0, 0));
-    return new Date(appointmentStartDateTimeUTC.getTime() - tzOffsetMinutes * 60 * 1000);
-  }
-
-  const rawTimeZone = typeof appointment.timezone === 'string' ? appointment.timezone : null;
-  const timeZone = rawTimeZone && rawTimeZone.includes('/') ? rawTimeZone : 'Europe/Rome';
-  return new Date(zonedDateTimeToUtcMs(
-    { year: baseYear, month: baseMonth, day: baseDay, hour: startHours, minute: startMinutes },
-    timeZone
-  ));
-};
+const getAdminSupportTypeForRole = (role) => ADMIN_SUPPORT_CONVERSATION_TYPES[String(role || '').toUpperCase()] || null;
 
 /**
  * Veterinary appointment chats open exactly at the appointment start and stay
@@ -107,13 +31,57 @@ const assertAppointmentChatHasStarted = (appointment) => {
 const sameId = (left, right) => String(left || '') === String(right || '');
 
 const assertConversationParticipant = (conversation, userId) => {
-  const participantIds = [conversation.veterinarianId, conversation.petOwnerId, conversation.adminId]
+  const participantIds = [conversation.veterinarianId, conversation.petOwnerId, conversation.adminId, conversation.businessId]
     .filter(Boolean)
     .map((id) => String(id));
 
   if (!participantIds.includes(String(userId))) {
     throw new Error('You do not have access to this conversation');
   }
+};
+
+/**
+ * Resolve and validate the non-admin participant for an admin support chat.
+ * Veterinarians retain their existing field/type; Pharmacy and Parapharmacy
+ * users use businessId and role-derived types so a caller cannot place a chat
+ * in the wrong Admin filter by supplying a role in the request body.
+ */
+const resolveAdminSupportParticipant = async ({ adminId, veterinarianId, businessId, actorId = null }) => {
+  if (Boolean(veterinarianId) === Boolean(businessId)) {
+    throw new Error('Exactly one admin support participant must be specified');
+  }
+
+  const participantId = businessId || veterinarianId;
+  const participantField = businessId ? 'businessId' : 'veterinarianId';
+  const resolvedAdminId = adminId || (await User.findOne({ role: 'ADMIN' }).select('_id').lean())?._id;
+  if (!resolvedAdminId) throw new Error('Admin not found');
+
+  const [admin, participant] = await Promise.all([
+    User.findById(resolvedAdminId),
+    User.findById(participantId),
+  ]);
+
+  if (!admin || admin.role !== 'ADMIN') throw new Error('Admin not found');
+  if (!participant) throw new Error('Support-chat participant not found');
+
+  const conversationType = getAdminSupportTypeForRole(participant.role);
+  if (!conversationType || (businessId && participant.role === 'VETERINARIAN')) {
+    throw new Error('This account type cannot use Admin support chat');
+  }
+  if (veterinarianId && participant.role !== 'VETERINARIAN') {
+    throw new Error('Veterinarian not found');
+  }
+  if (actorId && !sameId(actorId, resolvedAdminId) && !sameId(actorId, participantId)) {
+    throw new Error('You do not have access to this conversation');
+  }
+
+  return {
+    resolvedAdminId,
+    participant,
+    participantId,
+    participantField,
+    conversationType,
+  };
 };
 
 const resolveMergedConversation = async (conversation) => {
@@ -221,6 +189,7 @@ const sendMessage = async (data) => {
     veterinarianId,
     petOwnerId,
     adminId,
+    businessId,
     senderId,
     message,
     type = 'TEXT',
@@ -242,10 +211,10 @@ const sendMessage = async (data) => {
   }
 
   const isVeterinarianPetOwnerChat = !!petOwnerId && !!appointmentId;
-  const isAdminVeterinarianChat = !isVeterinarianPetOwnerChat;
+  const isAdminSupportChat = !isVeterinarianPetOwnerChat;
 
-  if (!isAdminVeterinarianChat && !isVeterinarianPetOwnerChat) {
-    throw new Error('Either admin-veterinarian or veterinarian-pet owner conversation must be specified');
+  if (!isAdminSupportChat && !isVeterinarianPetOwnerChat) {
+    throw new Error('Either an Admin support or veterinarian-pet owner conversation must be specified');
   }
 
   const sender = await User.findById(senderId);
@@ -253,56 +222,42 @@ const sendMessage = async (data) => {
     throw new Error('Sender not found');
   }
 
-  if (isAdminVeterinarianChat) {
-    const resolvedAdminId = adminId || (await User.findOne({ role: 'ADMIN' }).select('_id').lean())?._id;
-    if (!resolvedAdminId) {
-      throw new Error('Admin not found');
+  if (isAdminSupportChat) {
+    const {
+      resolvedAdminId,
+      participant,
+      participantId,
+      participantField,
+      conversationType,
+    } = await resolveAdminSupportParticipant({ adminId, veterinarianId, businessId, actorId: senderId });
+
+    if (!sameId(senderId, resolvedAdminId) && !sameId(senderId, participantId)) {
+      throw new Error('Sender must be either admin or the support-chat participant');
     }
 
-    const [admin, veterinarian] = await Promise.all([
-      User.findById(resolvedAdminId),
-      User.findById(veterinarianId)
-    ]);
-
-    if (!admin || admin.role !== 'ADMIN') {
-      throw new Error('Admin not found');
-    }
-
-    if (!veterinarian || veterinarian.role !== 'VETERINARIAN') {
-      throw new Error('Veterinarian not found');
-    }
-
-    if (senderId !== resolvedAdminId.toString() && senderId !== veterinarianId) {
-      throw new Error('Sender must be either admin or veterinarian');
-    }
-
-    let conversation = await Conversation.findOne({
+    const conversationQuery = {
       adminId: resolvedAdminId,
-      veterinarianId,
-      conversationType: 'ADMIN_VETERINARIAN'
-    });
-
+      [participantField]: participantId,
+      conversationType,
+    };
+    let conversation = await Conversation.findOne(conversationQuery);
     if (!conversation) {
       conversation = await Conversation.create({
-        adminId: resolvedAdminId,
-        veterinarianId,
-        conversationType: 'ADMIN_VETERINARIAN',
-        lastMessageAt: new Date()
+        ...conversationQuery,
+        lastMessageAt: new Date(),
       });
-    } else {
-      conversation.lastMessageAt = new Date();
-      conversation.lastMessage = {
-        message: messageText || (resolvedFileName ? `File: ${resolvedFileName}` : ''),
-        sentAt: new Date(),
-        sentBy: senderId
-      };
-      if (!conversation.lastMessage.readBy) {
-        conversation.lastMessage.readBy = [];
-      }
-      if (!conversation.lastMessage.readBy.includes(senderId)) {
-        conversation.lastMessage.readBy.push(senderId);
-      }
-      await conversation.save();
+    }
+
+    const sentAt = new Date();
+    conversation.lastMessageAt = sentAt;
+    conversation.lastMessage = {
+      message: messageText || (resolvedFileName ? `File: ${resolvedFileName}` : ''),
+      sentAt,
+      sentBy: senderId,
+      readBy: conversation.lastMessage?.readBy || [],
+    };
+    if (!conversation.lastMessage.readBy.some((id) => sameId(id, senderId))) {
+      conversation.lastMessage.readBy.push(senderId);
     }
 
     const chatMessage = await ChatMessage.create({
@@ -315,29 +270,34 @@ const sendMessage = async (data) => {
       fileName: resolvedFileName
     });
 
-    // Update conversation unread count
-    if (senderId === resolvedAdminId.toString()) {
+    // Update conversation unread count for the recipient. A full per-user
+    // unread calculation is still used by the list API, this field is kept for
+    // older clients and lightweight sidebar indicators.
+    if (sameId(senderId, resolvedAdminId)) {
       conversation.unreadCount = (conversation.unreadCount || 0) + 1;
     } else {
-      conversation.unreadCount = 0; // Veterinarian read their own message
+      conversation.unreadCount = 0;
     }
     await conversation.save();
 
-    // Send notification
-    if (senderId === resolvedAdminId.toString()) {
-      await Notification.create({
-        userId: veterinarianId,
-        title: 'New Message from Admin',
-        body: messageText
-          ? (messageText.length > 100 ? messageText.substring(0, 100) + '...' : messageText)
-          : (resolvedFileName ? `File: ${resolvedFileName}` : 'You have a new message'),
-        type: 'CHAT',
-        data: {
-          conversationId: conversation._id.toString(),
-          messageId: chatMessage._id.toString()
-        }
-      });
-    }
+    const recipientId = sameId(senderId, resolvedAdminId) ? participantId : resolvedAdminId;
+    const participantLabel = participant.role === 'PARAPHARMACY'
+      ? 'Parapharmacy'
+      : participant.role === 'PET_STORE'
+        ? 'Pharmacy'
+        : 'Veterinarian';
+    await Notification.create({
+      userId: recipientId,
+      title: sameId(senderId, resolvedAdminId) ? 'New Message from Admin' : `New Message from ${participantLabel}`,
+      body: messageText
+        ? (messageText.length > 100 ? `${messageText.substring(0, 100)}...` : messageText)
+        : (resolvedFileName ? `File: ${resolvedFileName}` : 'You have a new message'),
+      type: 'CHAT',
+      data: {
+        conversationId: conversation._id.toString(),
+        messageId: chatMessage._id.toString(),
+      },
+    });
 
     return chatMessage;
   } else {
@@ -496,72 +456,45 @@ const getMessages = async (conversationId, userId, options = {}) => {
 /**
  * Get or create conversation
  */
-const getOrCreateConversation = async (veterinarianId, petOwnerId, adminId, appointmentId, actorId = null) => {
+const getOrCreateConversation = async (
+  veterinarianId,
+  petOwnerId,
+  adminId,
+  appointmentId,
+  actorId = null,
+  businessId = null
+) => {
   const isVeterinarianPetOwnerChat = !!petOwnerId && !!appointmentId;
-  const isAdminVeterinarianChat = !isVeterinarianPetOwnerChat;
+  const isAdminSupportChat = !isVeterinarianPetOwnerChat;
 
-  if (!isAdminVeterinarianChat && !isVeterinarianPetOwnerChat) {
-    throw new Error('Either admin-veterinarian or veterinarian-pet owner conversation must be specified');
+  if (!isAdminSupportChat && !isVeterinarianPetOwnerChat) {
+    throw new Error('Either an Admin support or veterinarian-pet owner conversation must be specified');
   }
 
-  if (isAdminVeterinarianChat) {
-    const resolvedAdminId = adminId || (await User.findOne({ role: 'ADMIN' }).select('_id').lean())?._id;
-    if (!resolvedAdminId) {
-      throw new Error('Admin not found');
-    }
-
-    const [admin, veterinarian] = await Promise.all([
-      User.findById(resolvedAdminId),
-      User.findById(veterinarianId)
-    ]);
-
-    if (!admin || admin.role !== 'ADMIN') {
-      throw new Error('Admin not found');
-    }
-
-    if (!veterinarian || veterinarian.role !== 'VETERINARIAN') {
-      throw new Error('Veterinarian not found');
-    }
-
-    if (actorId && !sameId(actorId, resolvedAdminId) && !sameId(actorId, veterinarianId)) {
-      throw new Error('You do not have access to this conversation');
-    }
-
-    let conversation = await Conversation.findOne({
+  if (isAdminSupportChat) {
+    const {
+      resolvedAdminId,
+      participantId,
+      participantField,
+      conversationType,
+    } = await resolveAdminSupportParticipant({ adminId, veterinarianId, businessId, actorId });
+    const conversationQuery = {
       adminId: resolvedAdminId,
-      veterinarianId,
-      conversationType: 'ADMIN_VETERINARIAN'
-    })
-      .lean()
-      .maxTimeMS(2000);
-
-    if (conversation) {
-      // Populate separately
-      const [populatedAdmin, populatedVet] = await Promise.all([
-        User.findById(conversation.adminId)
-          .select('name email phone profileImage')
-          .lean()
-          .maxTimeMS(1000),
-        User.findById(conversation.veterinarianId)
-          .select('name email phone profileImage')
-          .lean()
-          .maxTimeMS(1000)
-      ]);
-      conversation.adminId = populatedAdmin;
-      conversation.veterinarianId = populatedVet;
-    }
-
+      [participantField]: participantId,
+      conversationType,
+    };
+    let conversation = await Conversation.findOne(conversationQuery).maxTimeMS(2000);
     if (!conversation) {
       conversation = await Conversation.create({
-        adminId: resolvedAdminId,
-        veterinarianId,
-        conversationType: 'ADMIN_VETERINARIAN',
-        lastMessageAt: new Date()
+        ...conversationQuery,
+        lastMessageAt: new Date(),
       });
-      await conversation.populate('adminId', 'name email phone profileImage');
-      await conversation.populate('veterinarianId', 'name email phone profileImage');
     }
-
+    await conversation.populate([
+      { path: 'adminId', select: 'name email phone profileImage role' },
+      { path: 'veterinarianId', select: 'name email phone profileImage role' },
+      { path: 'businessId', select: 'name fullName email phone profileImage role' },
+    ]);
     return conversation;
   } else {
     if (!appointmentId) {
@@ -659,7 +592,7 @@ const getConversations = async (userId, userRole, options = {}) => {
   let query = {};
 
   if (userRole === 'ADMIN') {
-    query = { adminId: userId, conversationType: 'ADMIN_VETERINARIAN' };
+    query = { adminId: userId, conversationType: { $in: ALL_ADMIN_SUPPORT_CONVERSATION_TYPES } };
   } else if (userRole === 'VETERINARIAN') {
     query = {
       $or: [
@@ -669,6 +602,11 @@ const getConversations = async (userId, userRole, options = {}) => {
     };
   } else if (userRole === 'PET_OWNER') {
     query = { petOwnerId: userId, conversationType: 'VETERINARIAN_PET_OWNER' };
+  } else if (getAdminSupportTypeForRole(userRole)) {
+    query = {
+      businessId: userId,
+      conversationType: getAdminSupportTypeForRole(userRole),
+    };
   } else {
     throw new Error('Invalid role');
   }
@@ -688,16 +626,21 @@ const getConversations = async (userId, userRole, options = {}) => {
   // Populate separately for better performance
   const adminIds = [...new Set(conversationsRaw.map(c => c.adminId?.toString()).filter(Boolean))];
   const vetIds = [...new Set(conversationsRaw.map(c => c.veterinarianId?.toString()).filter(Boolean))];
+  const businessIds = [...new Set(conversationsRaw.map(c => c.businessId?.toString()).filter(Boolean))];
   const ownerIds = [...new Set(conversationsRaw.map(c => c.petOwnerId?.toString()).filter(Boolean))];
   const appointmentIds = [...new Set(conversationsRaw.map(c => c.appointmentId?.toString()).filter(Boolean))];
 
-  const [admins, veterinarians, petOwners, appointments] = await Promise.all([
+  const [admins, veterinarians, businesses, petOwners, appointments] = await Promise.all([
     adminIds.length > 0 ? User.find({ _id: { $in: adminIds } })
       .select('name email phone profileImage')
       .lean()
       .maxTimeMS(2000) : Promise.resolve([]),
     vetIds.length > 0 ? User.find({ _id: { $in: vetIds } })
       .select('name email phone profileImage')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    businessIds.length > 0 ? User.find({ _id: { $in: businessIds } })
+      .select('name fullName email phone profileImage role')
       .lean()
       .maxTimeMS(2000) : Promise.resolve([]),
     ownerIds.length > 0 ? User.find({ _id: { $in: ownerIds } })
@@ -714,6 +657,8 @@ const getConversations = async (userId, userRole, options = {}) => {
   admins.forEach(a => { adminMap[a._id.toString()] = a; });
   const vetMap = {};
   veterinarians.forEach(v => { vetMap[v._id.toString()] = v; });
+  const businessMap = {};
+  businesses.forEach(b => { businessMap[b._id.toString()] = b; });
   const ownerMap = {};
   petOwners.forEach(o => { ownerMap[o._id.toString()] = o; });
   const appointmentMap = {};
@@ -723,6 +668,7 @@ const getConversations = async (userId, userRole, options = {}) => {
     ...c,
     adminId: c.adminId ? adminMap[c.adminId.toString()] : null,
     veterinarianId: c.veterinarianId ? vetMap[c.veterinarianId.toString()] : null,
+    businessId: c.businessId ? businessMap[c.businessId.toString()] : null,
     petOwnerId: c.petOwnerId ? ownerMap[c.petOwnerId.toString()] : null,
     appointmentId: c.appointmentId ? appointmentMap[c.appointmentId.toString()] : null
   }));
@@ -817,7 +763,7 @@ const getUnreadCount = async (userId, userRole) => {
   const userObjectId = new mongoose.Types.ObjectId(userId);
 
   if (userRole === 'ADMIN') {
-    conversationQuery = { adminId: userId, conversationType: 'ADMIN_VETERINARIAN' };
+    conversationQuery = { adminId: userId, conversationType: { $in: ALL_ADMIN_SUPPORT_CONVERSATION_TYPES } };
   } else if (userRole === 'VETERINARIAN') {
     conversationQuery = {
       $or: [
@@ -827,6 +773,11 @@ const getUnreadCount = async (userId, userRole) => {
     };
   } else if (userRole === 'PET_OWNER') {
     conversationQuery = { petOwnerId: userId, conversationType: 'VETERINARIAN_PET_OWNER' };
+  } else if (getAdminSupportTypeForRole(userRole)) {
+    conversationQuery = {
+      businessId: userId,
+      conversationType: getAdminSupportTypeForRole(userRole),
+    };
   } else {
     return 0;
   }
