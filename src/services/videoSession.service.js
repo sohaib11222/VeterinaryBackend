@@ -159,6 +159,10 @@ const getStreamCredentials = (session, userId, userName) => ({
   streamToken: streamService.generateUserToken(userId, userName),
   streamCallId: session.sessionId || session.callId,
   streamApiKey: streamService.getPublicApiKey(),
+  // The browser creates the Stream call before showing the in-app ringing UI.
+  // Sending both appointment participants prevents one user from creating a
+  // single-member call that the other participant cannot subsequently join.
+  streamMembers: [getId(session.veterinarianId), getId(session.petOwnerId)].filter(Boolean),
 });
 
 const startSession = async (appointmentId, userId, userName, { restartActive = false } = {}) => {
