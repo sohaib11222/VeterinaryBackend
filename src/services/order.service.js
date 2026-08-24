@@ -82,6 +82,20 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
       throw new Error(`Selected variant is inactive for ${product.name}`);
     }
 
+    if (product.requiresPrescription) {
+      const prescriptionRequestService = require('./productPrescriptionRequest.service');
+      const isApproved = await prescriptionRequestService.hasApprovedPrescription(
+        petOwnerId,
+        product._id,
+        variant?._id || null
+      );
+      if (!isApproved) {
+        const error = new Error(`An approved prescription is required before purchasing ${product.name}`);
+        error.statusCode = 403;
+        throw error;
+      }
+    }
+
     const availableStock = variant ? Number(variant.stock || 0) : Number(product.stock || 0);
     if (availableStock < item.quantity) {
       throw new Error(`Insufficient stock for product ${product.name}. Available: ${availableStock}, Requested: ${item.quantity}`);

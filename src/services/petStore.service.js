@@ -1,5 +1,6 @@
 const PetStore = require('../models/PetStore');
 const User = require('../models/User');
+const PetStoreSubscription = require('../models/PetStoreSubscription');
 
 const normalizeKind = (kind) => {
   const k = String(kind || '').trim().toUpperCase();
@@ -12,6 +13,104 @@ const normalizeKind = (kind) => {
 const deriveKindFromOwner = (owner) => {
   const role = String(owner?.role || '').trim().toUpperCase();
   return role === 'PARAPHARMACY' ? 'PARAPHARMACY' : 'PHARMACY';
+};
+
+const isPetStoreProfileComplete = (petStore) => Boolean(
+  String(petStore?.name || '').trim()
+  && String(petStore?.phone || '').trim()
+  && String(petStore?.address?.line1 || '').trim()
+  && String(petStore?.address?.city || '').trim()
+  && String(petStore?.address?.country || '').trim()
+  && String(petStore?.address?.zip || '').trim()
+);
+
+const hasActivePharmacySubscription = async (ownerId) => {
+  const subscription = await PetStoreSubscription.findOne({
+    petStoreOwnerId: ownerId,
+    isActive: true,
+    endDate: { $gt: new Date() },
+  })
+    .populate('subscriptionPlanId', 'planType')
+    .lean()
+    .maxTimeMS(2000);
+  return String(subscription?.subscriptionPlanId?.planType || '').toUpperCase() === 'PET_STORE';
+};
+
+const getSetupState = async (petStore, owner = null) => {
+  if (!petStore?.ownerId) throw new Error('Pet store owner is required');
+  const ownerRecord = owner || await User.findById(petStore.ownerId)
+    .select('role status')
+    .lean()
+    .maxTimeMS(1000);
+  const kind = deriveKindFromOwner(ownerRecord);
+  const profileCompleted = isPetStoreProfileComplete(petStore);
+  const requiresSubscription = kind === 'PHARMACY';
+  const hasActiveSubscription = requiresSubscription
+    ? await hasActivePharmacySubscription(petStore.ownerId)
+    : true;
+  const isApproved = String(ownerRecord?.status || '').toUpperCase() === 'APPROVED';
+  const isPublic = Boolean(petStore.isActive) && isApproved && profileCompleted && hasActiveSubscription;
+
+  return {
+    kind,
+    isApproved,
+    profileCompleted,
+    requiresSubscription,
+    hasActiveSubscription,
+    isPublic,
+    requirements: [
+      { key: 'profile', label: `Complete your ${kind === 'PARAPHARMACY' ? 'Parapharmacy' : 'Pharmacy'} profile`, complete: profileCompleted },
+      ...(requiresSubscription ? [{ key: 'subscription', label: 'Activate your Pharmacy subscription', complete: hasActiveSubscription }] : []),
+    ],
+  };
+};
+
+const refreshPetStoreSetup = async (petStoreId) => {
+  const petStore = await PetStore.findById(petStoreId).maxTimeMS(2000);
+  if (!petStore) throw new Error('Pet store not found');
+  const setup = await getSetupState(petStore);
+  const hasChanged = petStore.profileCompleted !== setup.profileCompleted || petStore.isPublic !== setup.isPublic;
+  if (hasChanged) {
+    petStore.profileCompleted = setup.profileCompleted;
+    petStore.isPublic = setup.isPublic;
+    petStore.setupCompletedAt = setup.isPublic ? (petStore.setupCompletedAt || new Date()) : null;
+    await petStore.save();
+  }
+  return { ...petStore.toObject(), setup };
+};
+
+const getSetupStatusForOwner = async (ownerId) => {
+  const petStore = await PetStore.findOne({ ownerId }).maxTimeMS(2000);
+  if (!petStore) {
+    const owner = await User.findById(ownerId).select('role').lean().maxTimeMS(1000);
+    const kind = deriveKindFromOwner(owner);
+    const requiresSubscription = kind === 'PHARMACY';
+    return {
+      hasProfile: false,
+      profileCompleted: false,
+      kind,
+      requiresSubscription,
+      hasActiveSubscription: !requiresSubscription,
+      isPublic: false,
+      requirements: [
+        { key: 'profile', label: `Create and complete your ${kind === 'PARAPHARMACY' ? 'Parapharmacy' : 'Pharmacy'} profile`, complete: false },
+        ...(requiresSubscription ? [{ key: 'subscription', label: 'Activate your Pharmacy subscription', complete: false }] : []),
+      ],
+    };
+  }
+  const refreshed = await refreshPetStoreSetup(petStore._id);
+  return { hasProfile: true, ...refreshed.setup, petStoreId: petStore._id.toString() };
+};
+
+const ensurePetStoreReadyForProducts = async (ownerId) => {
+  const setup = await getSetupStatusForOwner(ownerId);
+  if (!setup.hasProfile || !setup.profileCompleted) {
+    throw new Error('Complete your Pharmacy or Parapharmacy profile before managing products');
+  }
+  if (setup.requiresSubscription && !setup.hasActiveSubscription) {
+    throw new Error('You must have an active subscription plan to manage Pharmacy products');
+  }
+  return setup;
 };
 
 /**
@@ -38,7 +137,7 @@ const createPetStore = async (data) => {
     isActive: isActive !== undefined ? isActive : true
   });
 
-  return petStore;
+  return refreshPetStoreSetup(petStore._id);
 };
 
 /**
@@ -67,7 +166,7 @@ const updatePetStore = async (id, data) => {
 
   await petStore.save();
 
-  return petStore;
+  return refreshPetStoreSetup(petStore._id);
 };
 
 /**
@@ -85,9 +184,11 @@ const getPetStore = async (id) => {
     throw new Error('Pet store not found');
   }
 
+  const refreshed = await refreshPetStoreSetup(petStore._id);
   return {
-    ...petStore,
-    kind: deriveKindFromOwner(petStore.ownerId)
+    ...refreshed,
+    ownerId: petStore.ownerId,
+    kind: refreshed.setup.kind,
   };
 };
 
@@ -97,14 +198,14 @@ const getPetStore = async (id) => {
  * @returns {Promise<Object|null>} Pet store or null if not found
  */
 const getPetStoreByOwnerId = async (ownerId) => {
-  const petStore = await PetStore.findOne({ ownerId, isActive: true })
-    .lean()
+  const petStore = await PetStore.findOne({ ownerId })
     .maxTimeMS(2000);
   
   if (!petStore) {
     return null;
   }
 
+  const refreshed = await refreshPetStoreSetup(petStore._id);
   // Populate separately for better performance
   const owner = petStore.ownerId ? await User.findById(petStore.ownerId)
     .select('fullName email phone profileImage role')
@@ -112,9 +213,9 @@ const getPetStoreByOwnerId = async (ownerId) => {
     .maxTimeMS(1000) : null;
 
   return {
-    ...petStore,
+    ...refreshed,
     ownerId: owner,
-    kind: deriveKindFromOwner(owner)
+    kind: refreshed.setup.kind,
   };
 };
 
@@ -185,32 +286,35 @@ const listPetStores = async (filter = {}) => {
     ];
   }
 
-  const skip = (page - 1) * limit;
+  const petStores = await PetStore.find(query)
+    .populate('ownerId', 'fullName email phone profileImage role status')
+    .sort({ createdAt: -1 })
+    .maxTimeMS(3000);
 
-  const [petStores, total] = await Promise.all([
-    PetStore.find(query)
-      .populate('ownerId', 'fullName email phone profileImage role')
-      .skip(skip)
-      .limit(limit)
-      .sort({ createdAt: -1 }),
-    PetStore.countDocuments(query)
-  ]);
-
-  const normalized = petStores.map((ps) => {
+  const normalizedWithSetup = await Promise.all(petStores.map(async (ps) => {
     const obj = ps?.toObject ? ps.toObject() : ps;
+    const refreshed = await refreshPetStoreSetup(obj._id);
     return {
-      ...obj,
-      kind: deriveKindFromOwner(obj.ownerId)
+      ...refreshed,
+      ownerId: obj.ownerId,
+      kind: refreshed.setup.kind,
     };
-  });
+  }));
+  const visibleStores = includeAll
+    ? normalizedWithSetup
+    : normalizedWithSetup.filter((petStore) => petStore.setup.isPublic);
+  const currentPage = Math.max(1, Number(page) || 1);
+  const normalizedLimit = Math.min(100, Math.max(1, Number(limit) || 10));
+  const total = visibleStores.length;
+  const pagedStores = visibleStores.slice((currentPage - 1) * normalizedLimit, currentPage * normalizedLimit);
 
   return {
-    petStores: normalized,
+    petStores: pagedStores,
     pagination: {
-      page,
-      limit,
+      page: currentPage,
+      limit: normalizedLimit,
       total,
-      pages: Math.ceil(total / limit)
+      pages: Math.ceil(total / normalizedLimit)
     }
   };
 };
@@ -238,6 +342,9 @@ module.exports = {
   updatePetStore,
   getPetStore,
   getPetStoreByOwnerId,
+  getSetupStatusForOwner,
+  ensurePetStoreReadyForProducts,
+  refreshPetStoreSetup,
   listPetStores,
   deletePetStore
 };

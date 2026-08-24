@@ -19,7 +19,8 @@ const getMulterStorage = (folderName) => {
     general: 'general',
     pet: 'pets',
     medicalRecords: 'medical-records',
-    chat: 'chat'
+    chat: 'chat',
+    prescriptionRequest: 'product-prescriptions'
   };
 
   const uploadFolder = folderMap[folderName] || 'general';

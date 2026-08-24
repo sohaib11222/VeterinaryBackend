@@ -64,6 +64,10 @@ exports.getMe = asyncHandler(async (req, res) => {
   const result = await petStoreService.getPetStoreByOwnerId(req.userId);
   return sendSuccess(res, 'OK', result);
 });
+exports.getSetupStatus = asyncHandler(async (req, res) => {
+  const result = await petStoreService.getSetupStatusForOwner(req.userId);
+  return sendSuccess(res, 'OK', result);
+});
 exports.getMySubscription = asyncHandler(async (req, res) => {
   const result = await petStoreSubscriptionService.getMySubscription(req.userId);
   return sendSuccess(res, 'OK', result);

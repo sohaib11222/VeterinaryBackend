@@ -126,6 +126,7 @@ const createProduct = async (data) => {
     if (seller.status !== 'APPROVED') {
       throw new Error('Pet store account is not approved');
     }
+    await require('./petStore.service').ensurePetStoreReadyForProducts(sellerId);
     if (role === 'PET_STORE') {
       const PetStoreSubscription = require('../models/PetStoreSubscription');
       const SubscriptionPlan = require('../models/SubscriptionPlan');
@@ -241,6 +242,7 @@ const updateProduct = async (id, data, userId) => {
   }
 
   if (currentUser.role === 'PET_STORE') {
+    await require('./petStore.service').ensurePetStoreReadyForProducts(userId);
     const PetStoreSubscription = require('../models/PetStoreSubscription');
     const now = new Date();
     const subscription = await PetStoreSubscription.findOne({
@@ -283,6 +285,10 @@ const updateProduct = async (id, data, userId) => {
   if (Object.prototype.hasOwnProperty.call(updateData, 'sku')) {
     const nextSku = typeof updateData.sku === 'string' ? updateData.sku.trim() : '';
     updateData.sku = nextSku || undefined;
+  }
+
+  if (currentUser.role === 'PARAPHARMACY') {
+    await require('./petStore.service').ensurePetStoreReadyForProducts(userId);
   }
 
   if (Object.prototype.hasOwnProperty.call(updateData, 'variants')) {
@@ -360,6 +366,7 @@ const listProducts = async (filter = {}) => {
     tags,
     search,
     isActive,
+    includePrivate,
     page = 1,
     limit = 10
   } = filter;
@@ -410,17 +417,49 @@ const listProducts = async (filter = {}) => {
     ];
   }
 
-  const skip = (page - 1) * limit;
+  const currentPage = Math.max(1, Number(page) || 1);
+  const normalizedLimit = Math.min(100, Math.max(1, Number(limit) || 10));
+  const shouldFilterPrivateStores = includePrivate !== true && String(includePrivate || '').toLowerCase() !== 'true';
+  let productsRaw;
+  let total;
 
-  const [productsRaw, total] = await Promise.all([
-    Product.find(query)
+  if (shouldFilterPrivateStores) {
+    const candidates = await Product.find(query)
       .lean()
-      .maxTimeMS(3000)
-      .skip(skip)
-      .limit(limit)
-      .sort({ createdAt: -1 }),
-    Product.countDocuments(query).maxTimeMS(2000)
-  ]);
+      .maxTimeMS(5000)
+      .sort({ createdAt: -1 });
+    const pharmacyStoreIds = [...new Set(candidates
+      .filter((product) => ['PET_STORE', 'PARAPHARMACY'].includes(String(product.sellerType || '').toUpperCase()))
+      .map((product) => product.petStoreId?.toString())
+      .filter(Boolean))];
+    const petStoreService = require('./petStore.service');
+    const visibleStoreIds = new Set((await Promise.all(pharmacyStoreIds.map(async (id) => {
+      try {
+        const refreshed = await petStoreService.refreshPetStoreSetup(id);
+        return refreshed.setup.isPublic ? id : null;
+      } catch (_) {
+        return null;
+      }
+    }))).filter(Boolean));
+    const visibleCandidates = candidates.filter((product) => {
+      const isStoreProduct = ['PET_STORE', 'PARAPHARMACY'].includes(String(product.sellerType || '').toUpperCase());
+      return !isStoreProduct || visibleStoreIds.has(product.petStoreId?.toString());
+    });
+    total = visibleCandidates.length;
+    const skip = (currentPage - 1) * normalizedLimit;
+    productsRaw = visibleCandidates.slice(skip, skip + normalizedLimit);
+  } else {
+    const skip = (currentPage - 1) * normalizedLimit;
+    [productsRaw, total] = await Promise.all([
+      Product.find(query)
+        .lean()
+        .maxTimeMS(3000)
+        .skip(skip)
+        .limit(normalizedLimit)
+        .sort({ createdAt: -1 }),
+      Product.countDocuments(query).maxTimeMS(2000)
+    ]);
+  }
 
   // Populate separately for better performance
   const sellerIds = [...new Set(productsRaw.map(p => p.sellerId?.toString()).filter(Boolean))];
@@ -451,10 +490,10 @@ const listProducts = async (filter = {}) => {
   return {
     products,
     pagination: {
-      page,
-      limit,
+      page: currentPage,
+      limit: normalizedLimit,
       total,
-      pages: Math.ceil(total / limit)
+      pages: Math.ceil(total / normalizedLimit)
     }
   };
 };
@@ -478,6 +517,7 @@ const deleteProduct = async (id, userId) => {
   }
 
   if (currentUser.role === 'PET_STORE') {
+    await require('./petStore.service').ensurePetStoreReadyForProducts(userId);
     const PetStoreSubscription = require('../models/PetStoreSubscription');
     const now = new Date();
     const subscription = await PetStoreSubscription.findOne({
@@ -491,6 +531,10 @@ const deleteProduct = async (id, userId) => {
     if (!subscription) {
       throw new Error('You must have an active subscription plan to delete products');
     }
+  }
+
+  if (currentUser.role === 'PARAPHARMACY') {
+    await require('./petStore.service').ensurePetStoreReadyForProducts(userId);
   }
 
   await Product.findByIdAndDelete(id).maxTimeMS(2000);

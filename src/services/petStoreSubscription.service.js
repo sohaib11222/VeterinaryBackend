@@ -100,6 +100,7 @@ const purchaseSubscription = async (petStoreOwnerId, planId) => {
   }
 
   const my = await getMySubscription(petStoreOwnerId);
+  await require('./petStore.service').getSetupStatusForOwner(petStoreOwnerId);
   return {
     ...my,
     subscriptionId: subscription?._id || null,

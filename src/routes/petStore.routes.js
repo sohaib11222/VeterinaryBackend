@@ -16,6 +16,11 @@ router.get(
   asyncHandler(petStoreController.getMe)
 );
 router.get(
+  '/setup-status',
+  authGuard(['PET_STORE', 'PARAPHARMACY']),
+  asyncHandler(petStoreController.getSetupStatus)
+);
+router.get(
   '/my-subscription',
   authGuard(['PET_STORE']),
   asyncHandler(petStoreController.getMySubscription)

@@ -22,6 +22,7 @@ router.use('/vaccinations', require('./vaccination.routes'));
 router.use('/vaccines', require('./vaccine.routes'));
 router.use('/weight-records', require('./weightRecord.routes'));
 router.use('/products', require('./product.routes'));
+router.use('/product-prescription-requests', require('./productPrescriptionRequest.routes'));
 router.use('/pet-stores', require('./petStore.routes'));
 router.use('/orders', require('./order.routes'));
 router.use('/reviews', require('./review.routes'));

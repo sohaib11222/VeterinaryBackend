@@ -33,6 +33,18 @@ const petStoreSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  profileCompleted: {
+    type: Boolean,
+    default: false
+  },
+  isPublic: {
+    type: Boolean,
+    default: false
+  },
+  setupCompletedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
@@ -41,5 +53,6 @@ const petStoreSchema = new mongoose.Schema({
 // Indexes
 petStoreSchema.index({ ownerId: 1 });
 petStoreSchema.index({ isActive: 1 });
+petStoreSchema.index({ isPublic: 1, isActive: 1 });
 
 module.exports = mongoose.model('PetStore', petStoreSchema);

@@ -13,7 +13,8 @@ const FOLDER_MAP = {
   general: 'general',
   pet: 'pets',
   medicalRecords: 'medical-records',
-  chat: 'chat'
+  chat: 'chat',
+  prescriptionRequest: 'product-prescriptions'
 };
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg']);

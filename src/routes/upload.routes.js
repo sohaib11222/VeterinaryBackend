@@ -132,6 +132,18 @@ router.post(
 );
 
 /**
+ * @route POST /api/upload/product-prescription
+ * @desc Upload a pet owner's prescription for a prescription-only product
+ * @access Private (Pet Owner)
+ */
+router.post(
+  '/product-prescription',
+  authGuard(['PET_OWNER']),
+  uploadSingleChatFile('prescriptionRequest'),
+  asyncHandler(uploadController.uploadSingleFile)
+);
+
+/**
  * @route   POST /api/upload/chat
  * @desc    Upload file for chat (supports all file types - images, PDFs, documents, etc.)
  * @access  Private (Admin, Veterinarian, Pet Owner)

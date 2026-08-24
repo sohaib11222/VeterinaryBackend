@@ -86,7 +86,7 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.listMine = asyncHandler(async (req, res) => {
-  const params = { ...req.query, sellerId: req.userId, isActive: req.query?.isActive ?? 'all' };
+  const params = { ...req.query, sellerId: req.userId, isActive: req.query?.isActive ?? 'all', includePrivate: true };
   const result = await productService.listProducts(params);
   return sendSuccess(res, 'OK', result);
 });
