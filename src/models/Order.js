@@ -7,6 +7,24 @@ const orderItemSchema = new mongoose.Schema({
     ref: 'Product',
     required: true
   },
+  variantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null
+  },
+  variantName: {
+    type: String,
+    default: null
+  },
+  variantSnapshot: {
+    strengthValue: { type: Number, default: null },
+    strengthUnit: { type: String, default: null },
+    dosageForm: { type: String, default: null },
+    packageType: { type: String, default: null },
+    unitsPerPack: { type: Number, default: null },
+    unitLabel: { type: String, default: null },
+    packageDescription: { type: String, default: null },
+    sku: { type: String, default: null }
+  },
   quantity: {
     type: Number,
     required: true,

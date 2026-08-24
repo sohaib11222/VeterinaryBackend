@@ -25,7 +25,7 @@ exports.create = asyncHandler(async (req, res) => {
     const myStore = await petStoreService.getPetStoreByOwnerId(req.userId);
     if (myStore) {
       petStoreId = myStore._id;
-      sellerType = 'PET_STORE';
+      sellerType = req.userRole;
       sellerId = myStore.ownerId?._id || myStore.ownerId || req.userId;
     }
   } else if (req.userRole === 'ADMIN' && petStoreId) {
@@ -37,7 +37,7 @@ exports.create = asyncHandler(async (req, res) => {
       });
     }
     sellerId = petStore.ownerId?._id || petStore.ownerId;
-    sellerType = 'PET_STORE';
+    sellerType = String(petStore?.ownerId?.role || 'PET_STORE').toUpperCase();
   }
   
   const { petStoreId: _, sellerId: __, sellerType: ___, ...productBody } = req.body;
@@ -46,7 +46,15 @@ exports.create = asyncHandler(async (req, res) => {
     ...productBody,
     sellerId: sellerId,
     sellerType: sellerType,
-    petStoreId: petStoreId || null
+    petStoreId: petStoreId || null,
+    // The account role controls which detailed form/data shape is accepted.
+    // Admin-created products may still explicitly choose a product type.
+    productType:
+      req.userRole === 'PET_STORE'
+        ? 'PHARMACY_MEDICINE'
+        : req.userRole === 'PARAPHARMACY'
+          ? 'PARAPHARMACY_PRODUCT'
+          : productBody.productType
   };
   
   const result = await productService.createProduct(productData);
@@ -78,7 +86,7 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.listMine = asyncHandler(async (req, res) => {
-  const params = { ...req.query, sellerId: req.userId, sellerType: 'PET_STORE', isActive: req.query?.isActive ?? 'all' };
+  const params = { ...req.query, sellerId: req.userId, isActive: req.query?.isActive ?? 'all' };
   const result = await productService.listProducts(params);
   return sendSuccess(res, 'OK', result);
 });

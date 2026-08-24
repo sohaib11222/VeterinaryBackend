@@ -5,6 +5,41 @@ const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { ORDER_STATUS, PAYMENT_STATUS } = require('../types/enums');
 
+const resolveVariant = (product, variantId) => {
+  const variants = Array.isArray(product?.variants) ? product.variants : [];
+  if (!variants.length) return null;
+
+  if (variantId) {
+    return variants.find((variant) => String(variant?._id) === String(variantId)) || null;
+  }
+
+  return variants.find((variant) => variant?.isDefault) || variants[0] || null;
+};
+
+const getVariantSnapshot = (variant) => {
+  if (!variant) return null;
+  return {
+    strengthValue: variant.strengthValue ?? null,
+    strengthUnit: variant.strengthUnit || null,
+    dosageForm: variant.dosageForm || null,
+    packageType: variant.packageType || null,
+    unitsPerPack: variant.unitsPerPack ?? null,
+    unitLabel: variant.unitLabel || null,
+    packageDescription: variant.packageDescription || null,
+    sku: variant.sku || null
+  };
+};
+
+const syncProductStockFromVariants = (product) => {
+  if (!Array.isArray(product?.variants) || !product.variants.length) return;
+  product.stock = product.variants.reduce((total, variant) => total + Number(variant?.stock || 0), 0);
+  const defaultVariant = product.variants.find((variant) => variant?.isDefault) || product.variants[0];
+  if (defaultVariant) {
+    product.price = Number(defaultVariant.price || 0);
+    product.discountPrice = defaultVariant.discountPrice ?? null;
+  }
+};
+
 /**
  * Create order
  */
@@ -38,8 +73,18 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
       throw new Error(`Product ${item.productId} not found`);
     }
 
-    if (product.stock < item.quantity) {
-      throw new Error(`Insufficient stock for product ${product.name}. Available: ${product.stock}, Requested: ${item.quantity}`);
+    const hasVariants = Array.isArray(product.variants) && product.variants.length > 0;
+    const variant = resolveVariant(product, item.variantId);
+    if (hasVariants && !variant) {
+      throw new Error(`Selected variant is no longer available for ${product.name}`);
+    }
+    if (variant?.isActive === false) {
+      throw new Error(`Selected variant is inactive for ${product.name}`);
+    }
+
+    const availableStock = variant ? Number(variant.stock || 0) : Number(product.stock || 0);
+    if (availableStock < item.quantity) {
+      throw new Error(`Insufficient stock for product ${product.name}. Available: ${availableStock}, Requested: ${item.quantity}`);
     }
 
     const sellerKey = product.sellerId?.toString();
@@ -65,13 +110,16 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
       });
     }
 
-    const itemPrice = product.discountPrice || product.price;
+    const itemPrice = variant?.discountPrice ?? variant?.price ?? product.discountPrice ?? product.price;
     const itemTotal = itemPrice * item.quantity;
     petStoreMap.get(storeId).items.push({
       productId: product._id,
+      variantId: variant?._id || null,
+      variantName: variant?.name || null,
+      variantSnapshot: getVariantSnapshot(variant),
       quantity: item.quantity,
-      price: product.price,
-      discountPrice: product.discountPrice,
+      price: variant?.price ?? product.price,
+      discountPrice: variant?.discountPrice ?? product.discountPrice,
       total: itemTotal
     });
   }
@@ -528,8 +576,14 @@ const payForOrder = async (orderId, userId, userRole, paymentMethod = 'DUMMY') =
   for (const item of order.items) {
     const product = products.find(p => p._id.toString() === item.productId?.toString());
     if (product) {
-      if (product.stock < item.quantity) {
-        throw new Error(`Insufficient stock for product ${product.name}. Available: ${product.stock}, Requested: ${item.quantity}`);
+      const hasVariants = Array.isArray(product.variants) && product.variants.length > 0;
+      const variant = resolveVariant(product, item.variantId);
+      if (hasVariants && !variant) {
+        throw new Error(`Selected variant is no longer available for ${product.name}`);
+      }
+      const availableStock = variant ? Number(variant.stock || 0) : Number(product.stock || 0);
+      if (availableStock < item.quantity) {
+        throw new Error(`Insufficient stock for product ${product.name}. Available: ${availableStock}, Requested: ${item.quantity}`);
       }
     }
   }
@@ -556,7 +610,13 @@ const payForOrder = async (orderId, userId, userRole, paymentMethod = 'DUMMY') =
   for (const item of order.items) {
     const product = products.find(p => p._id.toString() === item.productId?.toString());
     if (product) {
-      product.stock -= item.quantity;
+      const variant = resolveVariant(product, item.variantId);
+      if (variant) {
+        variant.stock = Math.max(0, Number(variant.stock || 0) - Number(item.quantity || 0));
+        syncProductStockFromVariants(product);
+      } else {
+        product.stock -= item.quantity;
+      }
       await product.save();
     }
   }
@@ -608,23 +668,8 @@ const cancelOrder = async (orderId, userId, userRole) => {
     throw new Error('Cannot cancel an order that has already been paid');
   }
 
-  // Get product IDs for stock restoration
-  const productIds = [...new Set(order.items.map(item => item.productId?.toString()).filter(Boolean))];
-  
-  // Fetch products WITHOUT .lean() so we can call .save() later
-  const products = productIds.length > 0 ? await Product.find({ _id: { $in: productIds } })
-    .maxTimeMS(2000) : [];
-
-  // Restore product stock (only if order hasn't been paid or shipped)
-  if (order.paymentStatus !== 'PAID' || order.status !== 'SHIPPED') {
-    for (const item of order.items) {
-      const product = products.find(p => p._id.toString() === item.productId?.toString());
-      if (product) {
-        product.stock += item.quantity;
-        await product.save();
-      }
-    }
-  }
+  // Stock is reduced only once payment succeeds. An unpaid order therefore has
+  // nothing to restore when it is cancelled.
 
   order.status = 'CANCELLED';
   await order.save();

@@ -3,6 +3,76 @@ const User = require('../models/User');
 const SubscriptionPlan = require('../models/SubscriptionPlan');
 const VeterinarianSubscription = require('../models/VeterinarianSubscription');
 
+const nullableNumber = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+const normalizeVariants = (variants, fallback = {}) => {
+  const source = Array.isArray(variants) && variants.length
+    ? variants
+    : [{
+        name: fallback.name || 'Default option',
+        sku: fallback.sku,
+        barcode: fallback.barcode,
+        price: fallback.price,
+        discountPrice: fallback.discountPrice,
+        stock: fallback.stock
+      }];
+
+  const normalized = source.map((variant, index) => {
+    const price = nullableNumber(variant?.price);
+    const discountPrice = nullableNumber(variant?.discountPrice);
+    const stock = nullableNumber(variant?.stock);
+
+    if (price === null || price < 0) {
+      throw new Error(`A valid price is required for variant ${index + 1}`);
+    }
+    if (discountPrice !== null && (discountPrice < 0 || discountPrice >= price)) {
+      throw new Error(`Sale price must be lower than the regular price for variant ${index + 1}`);
+    }
+    if (stock === null || stock < 0) {
+      throw new Error(`A valid stock quantity is required for variant ${index + 1}`);
+    }
+
+    return {
+      ...(variant?._id ? { _id: variant._id } : {}),
+      name: String(variant?.name || `Option ${index + 1}`).trim(),
+      sku: String(variant?.sku || '').trim() || null,
+      barcode: String(variant?.barcode || '').trim() || null,
+      strengthValue: nullableNumber(variant?.strengthValue),
+      strengthUnit: String(variant?.strengthUnit || '').trim() || null,
+      dosageForm: String(variant?.dosageForm || '').trim() || null,
+      packageType: String(variant?.packageType || '').trim() || null,
+      unitsPerPack: nullableNumber(variant?.unitsPerPack),
+      unitLabel: String(variant?.unitLabel || '').trim() || null,
+      packageDescription: String(variant?.packageDescription || '').trim() || null,
+      price,
+      discountPrice,
+      stock,
+      isDefault: Boolean(variant?.isDefault),
+      isActive: variant?.isActive !== false
+    };
+  });
+
+  const defaultIndex = normalized.findIndex((variant) => variant.isDefault);
+  normalized.forEach((variant, index) => {
+    variant.isDefault = index === (defaultIndex >= 0 ? defaultIndex : 0);
+  });
+
+  return normalized;
+};
+
+const getVariantSummary = (variants) => {
+  const defaultVariant = variants.find((variant) => variant.isDefault) || variants[0];
+  return {
+    price: defaultVariant.price,
+    discountPrice: defaultVariant.discountPrice,
+    stock: variants.reduce((total, variant) => total + Number(variant.stock || 0), 0)
+  };
+};
+
 /**
  * Create product
  */
@@ -23,7 +93,14 @@ const createProduct = async (data) => {
     tags,
     requiresPrescription,
     isActive,
-    petStoreId
+    petStoreId,
+    productType,
+    brand,
+    manufacturer,
+    barcode,
+    medicineDetails,
+    parapharmacyDetails,
+    variants
   } = data;
 
   if (!sellerId) {
@@ -41,7 +118,7 @@ const createProduct = async (data) => {
     throw new Error('Seller must be a veterinarian');
   }
 
-  if (sellerType === 'PET_STORE') {
+  if (sellerType === 'PET_STORE' || sellerType === 'PARAPHARMACY') {
     const role = String(seller.role || '').toUpperCase();
     if (role !== 'PET_STORE' && role !== 'PARAPHARMACY') {
       throw new Error('Only pet store users can create pet store products');
@@ -96,22 +173,43 @@ const createProduct = async (data) => {
   }
 
   const skuValue = typeof sku === 'string' ? sku.trim() : '';
+  const normalizedVariants = normalizeVariants(variants, {
+    name,
+    sku: skuValue,
+    barcode,
+    price,
+    discountPrice,
+    stock
+  });
+  const variantSummary = getVariantSummary(normalizedVariants);
+  const normalizedProductType = ['PHARMACY_MEDICINE', 'PARAPHARMACY_PRODUCT', 'GENERAL_PRODUCT'].includes(productType)
+    ? productType
+    : 'GENERAL_PRODUCT';
+  const normalizedMedicineDetails = medicineDetails && typeof medicineDetails === 'object' ? medicineDetails : {};
+  const normalizedParapharmacyDetails = parapharmacyDetails && typeof parapharmacyDetails === 'object' ? parapharmacyDetails : {};
 
   const createDoc = {
     sellerId,
     sellerType: sellerType.toUpperCase(),
     petStoreId: petStoreId || null,
     name,
-    price,
-    stock: stock || 0,
+    price: variantSummary.price,
+    stock: variantSummary.stock,
     description,
-    discountPrice,
+    discountPrice: variantSummary.discountPrice,
+    productType: normalizedProductType,
+    brand: String(brand || '').trim() || null,
+    manufacturer: String(manufacturer || normalizedMedicineDetails.manufacturer || normalizedParapharmacyDetails.manufacturer || '').trim() || null,
+    barcode: String(barcode || '').trim() || null,
     images: Array.isArray(images) ? images : [],
     category,
     subCategory,
-    petType: petType || [],
+    petType: petType || normalizedMedicineDetails.targetSpecies || normalizedParapharmacyDetails.targetSpecies || [],
     tags: tags || [],
     requiresPrescription: requiresPrescription || false,
+    medicineDetails: normalizedMedicineDetails,
+    parapharmacyDetails: normalizedParapharmacyDetails,
+    variants: normalizedVariants,
     isActive: isActive !== undefined ? isActive : true
   };
 
@@ -185,6 +283,25 @@ const updateProduct = async (id, data, userId) => {
   if (Object.prototype.hasOwnProperty.call(updateData, 'sku')) {
     const nextSku = typeof updateData.sku === 'string' ? updateData.sku.trim() : '';
     updateData.sku = nextSku || undefined;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updateData, 'variants')) {
+    const normalizedVariants = normalizeVariants(updateData.variants, {
+      name: updateData.name || product.name,
+      sku: updateData.sku || product.sku,
+      barcode: updateData.barcode || product.barcode,
+      price: updateData.price ?? product.price,
+      discountPrice: updateData.discountPrice ?? product.discountPrice,
+      stock: updateData.stock ?? product.stock
+    });
+    Object.assign(updateData, getVariantSummary(normalizedVariants), { variants: normalizedVariants });
+  }
+
+  if (updateData.medicineDetails?.targetSpecies && !updateData.petType) {
+    updateData.petType = updateData.medicineDetails.targetSpecies;
+  }
+  if (updateData.parapharmacyDetails?.targetSpecies && !updateData.petType) {
+    updateData.petType = updateData.parapharmacyDetails.targetSpecies;
   }
 
   Object.keys(updateData).forEach(key => {
