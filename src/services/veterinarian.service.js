@@ -844,6 +844,7 @@ const getVeterinarianInvoices = async (veterinarianId, options = {}) => {
     status,
     fromDate,
     toDate,
+    search,
     page = 1,
     limit = 20
   } = options;
@@ -868,6 +869,8 @@ const getVeterinarianInvoices = async (veterinarianId, options = {}) => {
 
   const skip = (Number(page) - 1) * Number(limit);
   const veterinarianObjectId = new mongoose.Types.ObjectId(veterinarianId);
+  const searchTerm = String(search || '').trim();
+  const escapedSearch = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   const appointmentCollection = Appointment.collection.name;
   const userCollection = User.collection.name;
@@ -903,6 +906,20 @@ const getVeterinarianInvoices = async (veterinarianId, options = {}) => {
       }
     },
     { $unwind: { path: '$pet', preserveNullAndEmptyArrays: true } },
+    ...(searchTerm ? [{
+      $match: {
+        $or: [
+          { 'appointment.appointmentNumber': { $regex: escapedSearch, $options: 'i' } },
+          { 'petOwner.name': { $regex: escapedSearch, $options: 'i' } },
+          { 'petOwner.fullName': { $regex: escapedSearch, $options: 'i' } },
+          { 'petOwner.email': { $regex: escapedSearch, $options: 'i' } },
+          { 'pet.name': { $regex: escapedSearch, $options: 'i' } },
+          { 'pet.species': { $regex: escapedSearch, $options: 'i' } },
+          { provider: { $regex: escapedSearch, $options: 'i' } },
+          { status: { $regex: escapedSearch, $options: 'i' } }
+        ]
+      }
+    }] : []),
     {
       $addFields: {
         relatedAppointmentId: {

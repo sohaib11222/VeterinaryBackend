@@ -269,25 +269,44 @@ const approveRescheduleRequest = async (requestId, veterinarianId, approvalData)
   
   const originalFee = originalTransaction.amount;
   
-  // Calculate reschedule fee
+  // An explicit zero is a fee waiver. It must not be turned into the configured
+  // minimum fee, otherwise the pet owner is incorrectly sent to payment.
+  const hasPercentageFee = rescheduleFeePercentage !== undefined
+    && rescheduleFeePercentage !== null
+    && rescheduleFeePercentage !== '';
+  const hasFixedFee = rescheduleFee !== undefined
+    && rescheduleFee !== null
+    && rescheduleFee !== '';
   let calculatedFee;
-  
-  if (rescheduleFeePercentage !== undefined && rescheduleFeePercentage !== null) {
-    calculatedFee = (originalFee * rescheduleFeePercentage) / 100;
-  } else if (rescheduleFee !== undefined && rescheduleFee !== null) {
-    calculatedFee = rescheduleFee;
+  let explicitlyWaived = false;
+
+  if (hasPercentageFee) {
+    const percentage = Number(rescheduleFeePercentage);
+    if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) {
+      throw new Error('Reschedule fee percentage must be between 0 and 100');
+    }
+    explicitlyWaived = percentage === 0;
+    calculatedFee = (originalFee * percentage) / 100;
+  } else if (hasFixedFee) {
+    const fixedFee = Number(rescheduleFee);
+    if (!Number.isFinite(fixedFee) || fixedFee < 0) {
+      throw new Error('Reschedule fee cannot be negative');
+    }
+    explicitlyWaived = fixedFee === 0;
+    calculatedFee = fixedFee;
   } else {
-    // Default percentage from config
-    const defaultFeePercent = config.RESCHEDULE_DEFAULT_FEE_PERCENTAGE || 50;
+    const defaultFeePercent = Number(config.RESCHEDULE_DEFAULT_FEE_PERCENTAGE || 50);
     calculatedFee = (originalFee * defaultFeePercent) / 100;
   }
-  
-  // Apply minimum fee (from config, default $5)
-  const MIN_FEE = config.RESCHEDULE_MIN_FEE || 5;
-  calculatedFee = Math.max(calculatedFee, MIN_FEE);
-  
-  // Ensure it doesn't exceed original fee
+
+  if (!explicitlyWaived) {
+    const minimumFee = Number(config.RESCHEDULE_MIN_FEE || 5);
+    calculatedFee = Math.max(calculatedFee, Number.isFinite(minimumFee) ? minimumFee : 5);
+  }
+
   calculatedFee = Math.min(calculatedFee, originalFee);
+  calculatedFee = Number(calculatedFee.toFixed(2));
+  const requiresReschedulePayment = calculatedFee > 0;
   
   // Get original appointment
   const originalAppointment = request.appointmentId;
@@ -328,7 +347,14 @@ const approveRescheduleRequest = async (requestId, veterinarianId, approvalData)
 
   const newAppointmentDoc = await Appointment.findById(newAppointment?._id || newAppointment?.id || newAppointment);
   if (newAppointmentDoc) {
-    newAppointmentDoc.status = 'PENDING_PAYMENT';
+    const originalConsultationFee = originalAppointment.consultationFee !== null && originalAppointment.consultationFee !== undefined && originalAppointment.consultationFee !== ''
+      ? Number(originalAppointment.consultationFee)
+      : NaN;
+    newAppointmentDoc.status = requiresReschedulePayment ? 'PENDING_PAYMENT' : 'CONFIRMED';
+    newAppointmentDoc.paymentStatus = requiresReschedulePayment ? 'UNPAID' : 'PAID';
+    newAppointmentDoc.consultationFee = Number.isFinite(originalConsultationFee) && originalConsultationFee >= 0
+      ? originalConsultationFee
+      : originalFee;
     newAppointmentDoc.isRescheduled = true;
     newAppointmentDoc.originalAppointmentId = originalAppointment._id;
     newAppointmentDoc.rescheduleFee = calculatedFee;
@@ -354,22 +380,26 @@ const approveRescheduleRequest = async (requestId, veterinarianId, approvalData)
   request.respondedAt = new Date();
   await request.save();
   
+  const finalAppointment = newAppointmentDoc || newAppointment;
+
   // Send notification to pet owner
   const petOwnerId = request.petOwnerId._id ? request.petOwnerId._id.toString() : request.petOwnerId.toString();
   await notificationService.createNotification({
     userId: petOwnerId,
     title: 'Reschedule Request Approved',
-    body: `Your reschedule request has been approved. Please pay $${calculatedFee.toFixed(2)} to confirm your new appointment on ${new Date(newAppointmentDate).toLocaleDateString()} at ${newAppointmentTime}`,
+    body: requiresReschedulePayment
+      ? `Your reschedule request has been approved. Please pay $${calculatedFee.toFixed(2)} to confirm your new appointment on ${new Date(newAppointmentDate).toLocaleDateString()} at ${newAppointmentTime}`
+      : `Your reschedule request has been approved. Your new appointment is confirmed for ${new Date(newAppointmentDate).toLocaleDateString()} at ${newAppointmentTime}. No additional payment is required.`,
     type: 'RESCHEDULE_APPROVED',
     data: {
       rescheduleRequestId: request._id.toString(),
-      newAppointmentId: newAppointment._id.toString()
+      newAppointmentId: finalAppointment._id.toString()
     }
   });
   
   return {
     rescheduleRequest: request,
-    newAppointment: newAppointment
+    newAppointment: finalAppointment
   };
 };
 
@@ -429,7 +459,7 @@ const rejectRescheduleRequest = async (requestId, veterinarianId, rejectionReaso
  * @param {string} paymentMethod - Payment method
  * @returns {Promise<Object>} Transaction and updated appointment
  */
-const processReschedulePayment = async (requestId, petOwnerId, paymentMethod = 'DUMMY') => {
+const processReschedulePayment = async (requestId, petOwnerId, paymentMethod = 'STRIPE') => {
   const request = await RescheduleRequest.findById(requestId)
     .populate('appointmentId')
     .populate('petOwnerId', 'name email fullName');

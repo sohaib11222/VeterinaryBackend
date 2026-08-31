@@ -35,6 +35,11 @@ const appointmentSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  consultationFee: {
+    type: Number,
+    default: null,
+    min: 0
+  },
   timezone: {
     type: String,
     default: null

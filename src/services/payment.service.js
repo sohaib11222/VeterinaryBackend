@@ -47,6 +47,12 @@ const processAppointmentPayment = async (userId, appointmentId, amount, paymentM
   // Update appointment payment status
   appointment.paymentStatus = 'PAID';
   appointment.paymentMethod = normalizedPaymentMethod;
+  if (appointment.consultationFee === null || appointment.consultationFee === undefined || appointment.consultationFee === '') {
+    const parsedAmount = Number(amount);
+    if (Number.isFinite(parsedAmount) && parsedAmount >= 0) {
+      appointment.consultationFee = parsedAmount;
+    }
+  }
   await appointment.save();
 
   // Credit veterinarian balance (idempotent)

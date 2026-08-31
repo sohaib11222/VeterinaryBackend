@@ -64,6 +64,21 @@ const createAppointment = async (data) => {
 
   await subscriptionPolicy.enforceAppointmentBookingLimit({ veterinarianId, bookingType });
 
+  // Keep the fee shown on appointment details tied to the booked appointment,
+  // rather than a later change to the veterinarian's profile pricing.
+  const veterinarianProfile = await VeterinarianProfile.findOne({ userId: veterinarianId })
+    .select('consultationFees')
+    .lean()
+    .maxTimeMS(2000);
+  const configuredFee = bookingType === 'ONLINE'
+    ? veterinarianProfile?.consultationFees?.online
+    : veterinarianProfile?.consultationFees?.clinic;
+  const hasConfiguredFee = configuredFee !== null && configuredFee !== undefined && configuredFee !== '';
+  const parsedConsultationFee = hasConfiguredFee ? Number(configuredFee) : NaN;
+  const consultationFee = Number.isFinite(parsedConsultationFee) && parsedConsultationFee >= 0
+    ? parsedConsultationFee
+    : null;
+
   // Verify pet owner exists
   const petOwner = await User.findById(petOwnerId);
   if (!petOwner || petOwner.role !== 'PET_OWNER') {
@@ -146,6 +161,7 @@ const createAppointment = async (data) => {
     appointmentTime,
     appointmentDuration: duration,
     appointmentEndTime,
+    consultationFee,
     timezone: normalizedTimezone,
     timezoneOffset: tzOffset,
     bookingType: bookingType || 'VISIT',
@@ -180,7 +196,7 @@ const createAppointment = async (data) => {
   ]);
 
   const createdAppointment = await Appointment.findById(appointment._id)
-    .select('veterinarianId petOwnerId petId appointmentDate appointmentTime status')
+    .select('veterinarianId petOwnerId petId appointmentDate appointmentTime consultationFee status')
     .lean()
     .maxTimeMS(2000);
 
@@ -634,6 +650,7 @@ const listAppointments = async (filter = {}) => {
     paymentStatus,
     fromDate,
     toDate,
+    search,
     page = 1,
     limit = 10
   } = filter;
@@ -675,11 +692,38 @@ const listAppointments = async (filter = {}) => {
     }
   }
 
+  const searchTerm = String(search || '').trim();
+  if (searchTerm) {
+    const escapedSearch = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchPattern = new RegExp(escapedSearch, 'i');
+    const [matchingUsers, matchingPets] = await Promise.all([
+      User.find({ $or: [{ name: searchPattern }, { fullName: searchPattern }, { email: searchPattern }] })
+        .select('_id')
+        .lean()
+        .maxTimeMS(1500),
+      Pet.find({ $or: [{ name: searchPattern }, { species: searchPattern }, { breed: searchPattern }] })
+        .select('_id')
+        .lean()
+        .maxTimeMS(1500)
+    ]);
+
+    const matchingUserIds = matchingUsers.map((user) => user._id);
+    const matchingPetIds = matchingPets.map((pet) => pet._id);
+    query.$or = [
+      { appointmentNumber: searchPattern },
+      { status: searchPattern },
+      { bookingType: searchPattern },
+      { reason: searchPattern },
+      ...(matchingUserIds.length ? [{ veterinarianId: { $in: matchingUserIds } }, { petOwnerId: { $in: matchingUserIds } }] : []),
+      ...(matchingPetIds.length ? [{ petId: { $in: matchingPetIds } }] : [])
+    ];
+  }
+
   const skip = (page - 1) * limit;
 
   const [appointmentsRaw, total] = await Promise.all([
     Appointment.find(query)
-      .select('veterinarianId petOwnerId petId appointmentDate appointmentTime status appointmentNumber bookingType reason paymentStatus paymentMethod')
+      .select('veterinarianId petOwnerId petId appointmentDate appointmentTime appointmentDuration appointmentEndTime status appointmentNumber bookingType reason paymentStatus paymentMethod consultationFee isRescheduled originalAppointmentId rescheduleRequestId rescheduleFee')
       .skip(skip)
       .limit(limit)
       .sort({ appointmentDate: -1, appointmentTime: -1 })
@@ -740,7 +784,7 @@ const listAppointments = async (filter = {}) => {
  */
 const getAppointment = async (id, userId, userRole) => {
   const appointment = await Appointment.findById(id)
-    .select('veterinarianId petOwnerId petId videoSessionId appointmentDate appointmentTime status appointmentNumber bookingType reason petSymptoms notes')
+    .select('veterinarianId petOwnerId petId videoSessionId originalAppointmentId appointmentDate appointmentTime appointmentDuration appointmentEndTime timezone timezoneOffset consultationFee status appointmentNumber bookingType reason petSymptoms notes paymentStatus paymentMethod isRescheduled rescheduleRequestId rescheduleFee')
     .lean()
     .maxTimeMS(2000);
   
@@ -758,7 +802,7 @@ const getAppointment = async (id, userId, userRole) => {
   }
 
   // Populate separately
-  const [veterinarian, petOwner, pet, videoSession] = await Promise.all([
+  const [veterinarian, petOwner, pet, videoSession, veterinarianProfile, paymentTransaction] = await Promise.all([
     appointment.veterinarianId ? User.findById(appointment.veterinarianId)
       .select('name email phone profileImage')
       .lean()
@@ -773,11 +817,42 @@ const getAppointment = async (id, userId, userRole) => {
       .maxTimeMS(1000) : null,
     appointment.videoSessionId ? require('../models/VideoSession').findById(appointment.videoSessionId)
       .lean()
-      .maxTimeMS(1000) : null
+      .maxTimeMS(1000) : null,
+    appointment.veterinarianId ? VeterinarianProfile.findOne({ userId: appointment.veterinarianId })
+      .select('consultationFees')
+      .lean()
+      .maxTimeMS(1000) : null,
+    Transaction.findOne({
+      relatedAppointmentId: appointment.originalAppointmentId || appointment._id,
+      status: 'SUCCESS'
+    })
+      .select('amount')
+      .sort({ createdAt: -1 })
+      .lean()
+      .maxTimeMS(1000)
   ]);
+
+  const storedFee = appointment.consultationFee !== null && appointment.consultationFee !== undefined && appointment.consultationFee !== ''
+    ? Number(appointment.consultationFee)
+    : NaN;
+  const transactionFee = Number(paymentTransaction?.amount);
+  const configuredProfileFee = appointment.bookingType === 'ONLINE'
+    ? veterinarianProfile?.consultationFees?.online
+    : veterinarianProfile?.consultationFees?.clinic;
+  const profileFee = configuredProfileFee !== null && configuredProfileFee !== undefined && configuredProfileFee !== ''
+    ? Number(configuredProfileFee)
+    : NaN;
+  const consultationFee = Number.isFinite(storedFee) && storedFee >= 0
+    ? storedFee
+    : Number.isFinite(transactionFee) && transactionFee >= 0
+      ? transactionFee
+      : Number.isFinite(profileFee) && profileFee >= 0
+        ? profileFee
+        : null;
 
   return {
     ...appointment,
+    consultationFee,
     veterinarianId: veterinarian,
     petOwnerId: petOwner,
     petId: pet,

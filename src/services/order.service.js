@@ -40,6 +40,19 @@ const syncProductStockFromVariants = (product) => {
   }
 };
 
+const normalizeShippingAddress = (address = {}) => ({
+  line1: String(address?.line1 || '').trim(),
+  line2: String(address?.line2 || '').trim(),
+  city: String(address?.city || '').trim(),
+  state: String(address?.state || '').trim(),
+  country: String(address?.country || 'Italy').trim() || 'Italy',
+  zip: String(address?.zip || '').trim()
+});
+
+const hasCompleteShippingAddress = (address) => Boolean(
+  address?.line1 && address?.city && address?.state && address?.zip && address?.country
+);
+
 /**
  * Create order
  */
@@ -52,6 +65,20 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
     .maxTimeMS(2000);
   if (!petOwner || petOwner.role !== 'PET_OWNER') {
     throw new Error('Pet owner not found');
+  }
+
+  // An address is a snapshot of the delivery destination for this order. If a
+  // client does not supply a different address, use the owner's saved profile
+  // address rather than creating an order the seller cannot ship.
+  const requestedShippingAddress = normalizeShippingAddress(shippingAddress);
+  const hasRequestedShippingAddress = ['line1', 'line2', 'city', 'state', 'country', 'zip']
+    .some((field) => Boolean(String(shippingAddress?.[field] || '').trim()));
+  const resolvedShippingAddress = hasRequestedShippingAddress
+    ? requestedShippingAddress
+    : normalizeShippingAddress(petOwner.address);
+
+  if (!hasCompleteShippingAddress(resolvedShippingAddress)) {
+    throw new Error('A complete shipping address is required. Please save an address in your profile or provide a different delivery address.');
   }
 
   const productIds = items.map(item => item.productId);
@@ -158,7 +185,7 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
       finalShipping: null,
       total: initialTotal,
       initialTotal: initialTotal,
-      shippingAddress: shippingAddress || {},
+      shippingAddress: resolvedShippingAddress,
       paymentMethod: null,
       status: ORDER_STATUS.PENDING,
       paymentStatus: PAYMENT_STATUS.UNPAID

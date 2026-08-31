@@ -79,7 +79,7 @@ exports.pay = asyncHandler(async (req, res) => {
   const result = await rescheduleRequestService.processReschedulePayment(
     req.params.id,
     req.userId,
-    paymentMethod || 'DUMMY'
+    paymentMethod || 'STRIPE'
   );
   return sendSuccess(res, 'Reschedule fee paid successfully', result);
 });

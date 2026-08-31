@@ -1,258 +1,129 @@
 const Appointment = require('../models/Appointment');
+const Notification = require('../models/Notification');
 const notificationService = require('./notification.service');
-const User = require('../models/User');
-const Pet = require('../models/Pet');
+const { computeAppointmentWindow } = require('../utils/appointmentTime');
 
-/**
- * Parse appointment date helper
- */
-const parseAppointmentDate = (date) => {
-  if (!date) return null;
-  
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return null;
-  
-  return {
-    year: d.getUTCFullYear(),
-    month: d.getUTCMonth(),
-    day: d.getUTCDate()
-  };
+const getName = (user, fallback) => user?.name || user?.fullName || user?.email || fallback;
+
+const sendOnce = async ({ userId, appointmentId, action, title, body, data = {} }) => {
+  if (!userId) return false;
+  const exists = await Notification.exists({
+    userId,
+    type: 'APPOINTMENT',
+    'data.action': action,
+    'data.appointmentId': String(appointmentId),
+  });
+  if (exists) return false;
+
+  await notificationService.createNotification({
+    userId,
+    title,
+    body,
+    type: 'APPOINTMENT',
+    data: { appointmentId: String(appointmentId), action, ...data },
+  });
+  return true;
 };
 
-/**
- * Send notifications when appointment time arrives
- * This should be called by a scheduled job/cron that runs every minute
- * CRITICAL: Uses timezone-aware comparison to send notifications at the correct user local time
- */
-const sendAppointmentTimeNotifications = async () => {
-  const nowUTC = new Date(); // Current time in UTC
-  
-  // Find appointments that:
-  // 1. Are CONFIRMED
-  // 2. Are ONLINE type
-  // 3. Appointment date is today (we'll check this with timezone awareness)
-  // 4. Appointment time matches current time (within 1 minute window) - timezone aware
-  // 5. Haven't sent notification yet
-  
-  const appointments = await Appointment.find({
-    status: 'CONFIRMED',
-    bookingType: 'ONLINE'
-  })
-    .populate('veterinarianId', 'fullName email')
-    .populate('petOwnerId', 'fullName email')
-    .populate('petId', 'name species');
-
-  const notificationsToSend = [];
-
-  for (const appointment of appointments) {
-    try {
-      // Parse appointment date
-      const dateComponents = parseAppointmentDate(appointment.appointmentDate);
-      if (!dateComponents) {
-        console.log('⚠️ [Notification] Could not parse appointment date for appointment:', appointment._id);
-        continue;
-      }
-      
-      const { year, month, day } = dateComponents;
-      const [startHours, startMinutes] = appointment.appointmentTime.split(':').map(Number);
-      
-      // Get timezone offset
-      let tzOffsetMinutes;
-      if (appointment.timezoneOffset !== null && appointment.timezoneOffset !== undefined) {
-        tzOffsetMinutes = appointment.timezoneOffset;
-        
-        // Detect and correct wrong timezone offsets
-        if (startHours >= 12 && startHours <= 23 && tzOffsetMinutes === 60) {
-          console.log('⚠️ [Notification] Correcting wrong timezone offset from UTC+1 to UTC+5 for appointment:', appointment._id);
-          tzOffsetMinutes = 300; // Override with correct UTC+5 offset
-        }
-      } else {
-        // Default to UTC+5 for appointments without timezone
-        tzOffsetMinutes = 300;
-      }
-      
-      // Convert appointment time to UTC
-      const appointmentStartDateTimeUTC = new Date(Date.UTC(year, month, day, startHours, startMinutes, 0, 0));
-      const appointmentStartDateTime = new Date(appointmentStartDateTimeUTC.getTime() - (tzOffsetMinutes * 60 * 1000));
-      
-      // Check if current UTC time is within 1 minute of appointment UTC time
-      const timeDifference = Math.abs(nowUTC.getTime() - appointmentStartDateTime.getTime());
-      const timeDifferenceMinutes = timeDifference / (60 * 1000);
-      
-      if (timeDifferenceMinutes <= 1) { // Within 1 minute
-        // Check if we already sent notification
-        const Notification = require('../models/Notification');
-        const existingNotification = await Notification.findOne({
-          userId: { $in: [appointment.veterinarianId._id, appointment.petOwnerId._id] },
-          type: 'APPOINTMENT',
-          'data.appointmentId': appointment._id,
-          title: { $regex: /appointment.*time|video.*call.*time/i },
-          createdAt: {
-            $gte: new Date(nowUTC.getTime() - 5 * 60 * 1000) // Within last 5 minutes
-          }
-        });
-
-        if (!existingNotification) {
-          const petName = appointment.petId?.name || 'your pet';
-          // Send notifications to both veterinarian and pet owner
-          notificationsToSend.push(
-            notificationService.createNotification({
-              userId: appointment.veterinarianId._id,
-              title: 'Video Call Appointment Time',
-              body: `Your video call appointment with ${appointment.petOwnerId.fullName} for ${petName} is starting now. Click to join the call.`,
-              type: 'APPOINTMENT',
-              data: { 
-                appointmentId: appointment._id,
-                action: 'VIDEO_CALL_START',
-                appointmentTime: appointment.appointmentTime
-              }
-            }),
-            notificationService.createNotification({
-              userId: appointment.petOwnerId._id,
-              title: 'Video Call Appointment Time',
-              body: `Your video call appointment with Dr. ${appointment.veterinarianId.fullName} for ${petName} is starting now. Click to join the call.`,
-              type: 'APPOINTMENT',
-              data: { 
-                appointmentId: appointment._id,
-                action: 'VIDEO_CALL_START',
-                appointmentTime: appointment.appointmentTime
-              }
-            })
-          );
-        }
-      }
-    } catch (error) {
-      console.error('❌ [Notification] Error processing appointment for time notification:', appointment._id, error);
-    }
-  }
-
-  if (notificationsToSend.length > 0) {
-    await Promise.all(notificationsToSend);
-    console.log(`✅ Sent ${notificationsToSend.length} appointment time notifications`);
-  }
-
-  return { sent: notificationsToSend.length };
-};
+const findConfirmedAppointments = () => Appointment.find({ status: 'CONFIRMED' })
+  .populate('veterinarianId', 'name fullName email')
+  .populate('petOwnerId', 'name fullName email')
+  .populate('petId', 'name species');
 
 /**
- * Check and send notifications for upcoming appointments (5 minutes before)
- * CRITICAL: Uses timezone-aware comparison to send reminders at the correct user local time
+ * Send a one-time reminder about ten minutes before a confirmed appointment.
+ * The shared appointment-time utility converts the stored appointment calendar
+ * date, clock value, IANA timezone, and DST offset into one UTC timestamp.
  */
 const sendUpcomingAppointmentNotifications = async () => {
-  const nowUTC = new Date(); // Current time in UTC
-  const fiveMinutesLaterUTC = new Date(nowUTC.getTime() + 5 * 60 * 1000);
-
-  const appointments = await Appointment.find({
-    status: 'CONFIRMED',
-    bookingType: 'ONLINE'
-  })
-    .populate('veterinarianId', 'fullName email')
-    .populate('petOwnerId', 'fullName email')
-    .populate('petId', 'name species');
-
-  const notificationsToSend = [];
+  const now = new Date();
+  const appointments = await findConfirmedAppointments();
+  let sent = 0;
 
   for (const appointment of appointments) {
     try {
-      // Parse appointment date
-      const dateComponents = parseAppointmentDate(appointment.appointmentDate);
-      if (!dateComponents) {
-        console.log('⚠️ [Notification] Could not parse appointment date for appointment:', appointment._id);
-        continue;
-      }
-      
-      const { year, month, day } = dateComponents;
-      const [startHours, startMinutes] = appointment.appointmentTime.split(':').map(Number);
-      
-      // Get timezone offset
-      let tzOffsetMinutes;
-      if (appointment.timezoneOffset !== null && appointment.timezoneOffset !== undefined) {
-        tzOffsetMinutes = appointment.timezoneOffset;
-        
-        // Detect and correct wrong timezone offsets
-        if (startHours >= 12 && startHours <= 23 && tzOffsetMinutes === 60) {
-          console.log('⚠️ [Notification] Correcting wrong timezone offset from UTC+1 to UTC+5 for appointment:', appointment._id);
-          tzOffsetMinutes = 300; // Override with correct UTC+5 offset
-        }
-      } else {
-        // Default to UTC+5 for appointments without timezone
-        tzOffsetMinutes = 300;
-      }
-      
-      // Convert appointment time to UTC
-      const appointmentStartDateTimeUTC = new Date(Date.UTC(year, month, day, startHours, startMinutes, 0, 0));
-      const appointmentStartDateTime = new Date(appointmentStartDateTimeUTC.getTime() - (tzOffsetMinutes * 60 * 1000));
-      
-      // Check if appointment is 5 minutes from now (within 1 minute window)
-      const timeDifference = Math.abs(fiveMinutesLaterUTC.getTime() - appointmentStartDateTime.getTime());
-      const timeDifferenceMinutes = timeDifference / (60 * 1000);
-      
-      if (timeDifferenceMinutes <= 1) { // Appointment is 5 minutes away (within 1 minute window)
-        // Check if we already sent reminder notification
-        const Notification = require('../models/Notification');
-        const existingNotification = await Notification.findOne({
-          userId: { $in: [appointment.veterinarianId._id, appointment.petOwnerId._id] },
-          type: 'APPOINTMENT',
-          'data.appointmentId': appointment._id,
-          title: { $regex: /appointment.*reminder|upcoming.*appointment/i },
-          createdAt: {
-            $gte: new Date(nowUTC.getTime() - 10 * 60 * 1000) // Within last 10 minutes
-          }
-        });
+      const { start } = computeAppointmentWindow(appointment);
+      const minutesUntilStart = (start.getTime() - now.getTime()) / 60000;
+      // The worker runs every minute. A two-minute window makes the reminder
+      // reliable when the worker starts a few seconds early or late.
+      if (minutesUntilStart < 8.5 || minutesUntilStart > 10.5) continue;
 
-        if (!existingNotification) {
-          // Format appointment time for display (in user's local timezone)
-          const appointmentDateTime = new Date(appointmentStartDateTime);
-          const localTimeString = appointmentDateTime.toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'numeric',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-          });
-
-          const petName = appointment.petId?.name || 'your pet';
-          notificationsToSend.push(
-            notificationService.createNotification({
-              userId: appointment.veterinarianId._id,
-              title: 'Upcoming Video Call Appointment',
-              body: `You have a video call appointment with ${appointment.petOwnerId.fullName} for ${petName} in 5 minutes at ${localTimeString}.`,
-              type: 'APPOINTMENT',
-              data: { 
-                appointmentId: appointment._id,
-                action: 'VIDEO_CALL_REMINDER',
-                appointmentTime: appointment.appointmentTime
-              }
-            }),
-            notificationService.createNotification({
-              userId: appointment.petOwnerId._id,
-              title: 'Upcoming Video Call Appointment',
-              body: `You have a video call appointment with Dr. ${appointment.veterinarianId.fullName} for ${petName} in 5 minutes at ${localTimeString}.`,
-              type: 'APPOINTMENT',
-              data: { 
-                appointmentId: appointment._id,
-                action: 'VIDEO_CALL_REMINDER',
-                appointmentTime: appointment.appointmentTime
-              }
-            })
-          );
-        }
-      }
+      const petName = appointment.petId?.name || 'your pet';
+      const vetName = getName(appointment.veterinarianId, 'your veterinarian');
+      const ownerName = getName(appointment.petOwnerId, 'the pet owner');
+      const sharedData = { appointmentTime: appointment.appointmentTime, minutesBefore: 10 };
+      const created = await Promise.all([
+        sendOnce({
+          userId: appointment.veterinarianId?._id,
+          appointmentId: appointment._id,
+          action: 'APPOINTMENT_REMINDER_10_MIN',
+          title: 'Appointment starts in 10 minutes',
+          body: `Your appointment with ${ownerName} for ${petName} starts at ${appointment.appointmentTime}.`,
+          data: sharedData,
+        }),
+        sendOnce({
+          userId: appointment.petOwnerId?._id,
+          appointmentId: appointment._id,
+          action: 'APPOINTMENT_REMINDER_10_MIN',
+          title: 'Appointment starts in 10 minutes',
+          body: `Your appointment with Dr. ${vetName} for ${petName} starts at ${appointment.appointmentTime}.`,
+          data: sharedData,
+        }),
+      ]);
+      sent += created.filter(Boolean).length;
     } catch (error) {
-      console.error('❌ [Notification] Error processing appointment for reminder:', appointment._id, error);
+      console.error('Appointment reminder failed:', appointment?._id, error);
     }
   }
+  return { sent };
+};
 
-  if (notificationsToSend.length > 0) {
-    await Promise.all(notificationsToSend);
-    console.log(`✅ Sent ${notificationsToSend.length} upcoming appointment notifications`);
+/**
+ * Send the existing video-call start notification once the online appointment
+ * has started. This uses the same timezone-safe start value as the reminder.
+ */
+const sendAppointmentTimeNotifications = async () => {
+  const now = new Date();
+  const appointments = await Appointment.find({ status: 'CONFIRMED', bookingType: 'ONLINE' })
+    .populate('veterinarianId', 'name fullName email')
+    .populate('petOwnerId', 'name fullName email')
+    .populate('petId', 'name species');
+  let sent = 0;
+
+  for (const appointment of appointments) {
+    try {
+      const { start, end } = computeAppointmentWindow(appointment);
+      const minutesFromStart = (now.getTime() - start.getTime()) / 60000;
+      if (minutesFromStart < -0.25 || minutesFromStart > 1 || now > end) continue;
+
+      const petName = appointment.petId?.name || 'your pet';
+      const vetName = getName(appointment.veterinarianId, 'your veterinarian');
+      const ownerName = getName(appointment.petOwnerId, 'the pet owner');
+      const sharedData = { appointmentTime: appointment.appointmentTime };
+      const created = await Promise.all([
+        sendOnce({
+          userId: appointment.veterinarianId?._id,
+          appointmentId: appointment._id,
+          action: 'VIDEO_CALL_START',
+          title: 'Video call appointment time',
+          body: `Your video appointment with ${ownerName} for ${petName} is ready to join.`,
+          data: sharedData,
+        }),
+        sendOnce({
+          userId: appointment.petOwnerId?._id,
+          appointmentId: appointment._id,
+          action: 'VIDEO_CALL_START',
+          title: 'Video call appointment time',
+          body: `Your video appointment with Dr. ${vetName} for ${petName} is ready to join.`,
+          data: sharedData,
+        }),
+      ]);
+      sent += created.filter(Boolean).length;
+    } catch (error) {
+      console.error('Appointment start notification failed:', appointment?._id, error);
+    }
   }
-
-  return { sent: notificationsToSend.length };
+  return { sent };
 };
 
-module.exports = {
-  sendAppointmentTimeNotifications,
-  sendUpcomingAppointmentNotifications
-};
+module.exports = { sendAppointmentTimeNotifications, sendUpcomingAppointmentNotifications };

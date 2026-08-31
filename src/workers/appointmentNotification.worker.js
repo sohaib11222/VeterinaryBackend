@@ -8,7 +8,7 @@ const runAppointmentNotifications = async () => {
   try {
     console.log('🔔 [Worker] Checking for appointment notifications...');
     
-    // Send upcoming appointment notifications (5 minutes before)
+    // Send upcoming appointment notifications (10 minutes before)
     await sendUpcomingAppointmentNotifications();
     
     // Send appointment time notifications (when time arrives)
