@@ -15,6 +15,7 @@ const Announcement = require('../models/Announcement');
 const InsuranceCompany = require('../models/InsuranceCompany');
 const Specialization = require('../models/Specialization');
 const Vaccine = require('../models/Vaccine');
+const SupportTicket = require('../models/SupportTicket');
 
 /**
  * Get dashboard statistics
@@ -83,6 +84,14 @@ const getSidebarIndicators = async () => {
 
     return latest?.createdAt || null;
   };
+  const latestUpdatedAt = async (Model, query = {}) => {
+    const latest = await Model.findOne(query)
+      .select('updatedAt lastMessageAt')
+      .sort({ updatedAt: -1 })
+      .lean()
+      .maxTimeMS(2000);
+    return latest?.lastMessageAt || latest?.updatedAt || null;
+  };
 
   const petStoreRoles = { $in: ['PET_STORE', 'PARAPHARMACY'] };
   const [
@@ -108,6 +117,8 @@ const getSidebarIndicators = async () => {
     pendingVeterinarianCount,
     pendingPetStoreCount,
     pendingWithdrawalCount,
+    supportTickets,
+    unreadSupportTicketCount,
   ] = await Promise.all([
     latestCreatedAt(User),
     latestCreatedAt(User, { role: 'VETERINARIAN' }),
@@ -131,6 +142,8 @@ const getSidebarIndicators = async () => {
     User.countDocuments({ role: 'VETERINARIAN', status: 'PENDING' }).maxTimeMS(2000),
     User.countDocuments({ role: petStoreRoles, status: 'PENDING' }).maxTimeMS(2000),
     WithdrawalRequest.countDocuments({ status: 'PENDING' }).maxTimeMS(2000),
+    latestUpdatedAt(SupportTicket),
+    SupportTicket.countDocuments({ unreadForAdmin: true }).maxTimeMS(2000),
   ]);
 
   return {
@@ -164,6 +177,10 @@ const getSidebarIndicators = async () => {
       reviews: { latestAt: reviews },
       insuranceCompanies: { latestAt: insuranceCompanies },
       specializations: { latestAt: specializations },
+      supportTickets: {
+        latestAt: supportTickets,
+        pendingCount: unreadSupportTicketCount,
+      },
     },
   };
 };

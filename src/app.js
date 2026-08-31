@@ -13,7 +13,7 @@ const app = express();
 // General API requests should fail quickly, but chat uploads can legitimately
 // take longer on mobile connections (each file may be up to 50 MB).
 app.use((req, res, next) => {
-  const requestTimeout = req.path.startsWith('/api/upload/') ? 120000 : 30000;
+  const requestTimeout = req.path.startsWith('/api/upload/') || req.path.startsWith('/api/support-tickets/attachments') ? 120000 : 30000;
   return timeout(requestTimeout)(req, res, next);
 });
 
@@ -33,6 +33,13 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(requestLogger);
 
 const uploadsDir = path.join(__dirname, "..", "uploads");
+
+// Ticket evidence contains private patient information. It must be retrieved
+// through the authenticated support-ticket download route, never as a public
+// static upload.
+app.use(['/uploads/support-tickets', '/api/uploads/support-tickets'], (req, res) => {
+  res.status(404).json({ success: false, message: 'File not found' });
+});
 
 // Serve static files from uploads directory
 app.use("/uploads", express.static(uploadsDir, {
