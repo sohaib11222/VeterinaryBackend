@@ -238,8 +238,13 @@ const getAppointmentHistory = async (petOwnerId, options = {}) => {
  * Get payment history
  */
 const getPaymentHistory = async (petOwnerId, options = {}) => {
-  const { status, fromDate, toDate, page = 1, limit = 20 } = options;
+  const { status, fromDate, toDate, search, page = 1, limit = 20 } = options;
   const skip = (page - 1) * limit;
+  const searchTerm = String(search || '').trim().toLowerCase();
+  // Names and appointment fields live in referenced collections.  For a search,
+  // enrich the owner's transactions first and apply the text match afterwards.
+  // The normal, unfiltered listing remains fully paginated in MongoDB.
+  const shouldSearch = Boolean(searchTerm);
 
   const query = { userId: petOwnerId, amount: { $gt: 0 } };
 
@@ -259,9 +264,9 @@ const getPaymentHistory = async (petOwnerId, options = {}) => {
 
   const [transactionsRaw, total] = await Promise.all([
     Transaction.find(query)
-      .select('relatedAppointmentId amount status type createdAt')
-      .skip(skip)
-      .limit(limit)
+      .select('relatedAppointmentId amount currency provider status type createdAt')
+      .skip(shouldSearch ? 0 : skip)
+      .limit(shouldSearch ? 5000 : limit)
       .sort({ createdAt: -1 })
       .lean()
       .maxTimeMS(3000),
@@ -317,19 +322,74 @@ const getPaymentHistory = async (petOwnerId, options = {}) => {
     };
   });
 
+  const searchMatches = shouldSearch
+    ? formattedTransactions.filter((transaction) => {
+      const appointment = transaction.relatedAppointmentId || {};
+      const veterinarian = appointment.veterinarianId || {};
+      const pet = appointment.petId || {};
+      return [
+        appointment.appointmentNumber,
+        veterinarian.name,
+        veterinarian.fullName,
+        veterinarian.email,
+        pet.name,
+        pet.species,
+        transaction.provider,
+        transaction.status
+      ].some((value) => String(value || '').toLowerCase().includes(searchTerm));
+    })
+    : formattedTransactions;
+
+  const filteredTotal = shouldSearch ? searchMatches.length : total;
+  const paginatedTransactions = shouldSearch ? searchMatches.slice(skip, skip + Number(limit)) : searchMatches;
+
   return {
-    transactions: formattedTransactions,
+    transactions: paginatedTransactions,
     pagination: {
       page,
       limit,
-      total,
-      pages: Math.ceil(total / limit)
+      total: filteredTotal,
+      pages: Math.ceil(filteredTotal / limit)
     }
   };
+};
+
+/**
+ * Get one appointment invoice belonging to the authenticated pet owner.
+ * Keeping the owner criterion in this query prevents an owner from opening
+ * another user's invoice simply by changing the transaction id in the URL.
+ */
+const getPetOwnerInvoiceByTransactionId = async (petOwnerId, transactionId) => {
+  validateObjectId(petOwnerId, 'Pet Owner ID');
+  validateObjectId(transactionId, 'Transaction ID');
+
+  const invoice = await Transaction.findOne({
+    _id: transactionId,
+    userId: petOwnerId,
+    relatedAppointmentId: { $ne: null }
+  })
+    .populate({
+      path: 'relatedAppointmentId',
+      select: 'appointmentNumber appointmentDate appointmentTime veterinarianId petOwnerId petId reason',
+      populate: [
+        { path: 'veterinarianId', select: 'name fullName email profileImage' },
+        { path: 'petOwnerId', select: 'name fullName email profileImage' },
+        { path: 'petId', select: 'name species breed photo' }
+      ]
+    })
+    .populate('userId', 'name fullName email profileImage')
+    .lean();
+
+  if (!invoice) {
+    throw new Error('Invoice not found');
+  }
+
+  return invoice;
 };
 
 module.exports = {
   getPetOwnerDashboard,
   getAppointmentHistory,
-  getPaymentHistory
+  getPaymentHistory,
+  getPetOwnerInvoiceByTransactionId
 };

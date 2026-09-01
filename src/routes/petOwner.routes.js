@@ -22,5 +22,7 @@ router.get('/appointments', asyncHandler(petOwnerController.getAppointmentHistor
  * Get payment history
  */
 router.get('/payments', asyncHandler(petOwnerController.getPaymentHistory));
+router.get('/payments/:transactionId/pdf', asyncHandler(petOwnerController.downloadInvoicePdf));
+router.get('/payments/:transactionId', asyncHandler(petOwnerController.getInvoiceByTransactionId));
 
 module.exports = router;
