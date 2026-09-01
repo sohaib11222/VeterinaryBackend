@@ -19,6 +19,8 @@ const calculateNetAmount = (amount, platformFeePercent = 0) => {
 // withdrawal calculation to cents so the request, wallet balance, and audit
 // record always agree.
 const roundCurrency = (amount) => Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
+const SUBSCRIPTION_PAYOUT_METHOD = 'SUBSCRIBE';
+const isStorePayoutRole = (role) => ['PET_STORE', 'PARAPHARMACY'].includes(String(role || '').toUpperCase());
 
 /**
  * Credit balance to user (internal helper)
@@ -210,8 +212,8 @@ const topUpBalance = async (userId, amount, adminId) => {
  */
 const requestWithdrawal = async (userId, amount, paymentDetails = {}) => {
   validateObjectId(userId, 'User ID');
-  
-  if (amount <= 0) {
+  const withdrawalAmount = Number(amount);
+  if (!Number.isFinite(withdrawalAmount) || withdrawalAmount <= 0) {
     throw new Error('Amount must be greater than 0');
   }
 
@@ -222,8 +224,13 @@ const requestWithdrawal = async (userId, amount, paymentDetails = {}) => {
   }
 
   // Check if user has sufficient balance
-  if ((user.balance || 0) < amount) {
+  if ((user.balance || 0) < withdrawalAmount) {
     throw new Error('Insufficient balance');
+  }
+
+  const requestedMethod = String(paymentDetails.paymentMethod || '').trim().toUpperCase();
+  if (isStorePayoutRole(user.role) && requestedMethod !== SUBSCRIPTION_PAYOUT_METHOD) {
+    throw new Error('Pharmacy and Parapharmacy payouts must use the Subscribe payment method');
   }
 
   // Check if there's a pending withdrawal request
@@ -239,9 +246,11 @@ const requestWithdrawal = async (userId, amount, paymentDetails = {}) => {
   // Create withdrawal request
   const withdrawalRequest = await WithdrawalRequest.create({
     userId,
-    amount,
+    amount: withdrawalAmount,
     status: 'PENDING',
-    paymentMethod: paymentDetails.paymentMethod || null,
+    paymentMethod: isStorePayoutRole(user.role)
+      ? SUBSCRIPTION_PAYOUT_METHOD
+      : requestedMethod || null,
     paymentDetails: paymentDetails.details || null
   });
 

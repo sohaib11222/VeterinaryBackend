@@ -3,6 +3,11 @@ const Appointment = require('../models/Appointment');
 const streamService = require('./stream.service');
 const { computeAppointmentWindow } = require('../utils/appointmentTime');
 
+// A ringing session is only an invitation, not an active call. Closing it on
+// the server after a short period lets either participant start a new call in
+// the same still-valid appointment window without manual database cleanup.
+const RING_TIMEOUT_MS = 60 * 1000;
+
 const createHttpError = (message, statusCode = 400) => {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -10,6 +15,19 @@ const createHttpError = (message, statusCode = 400) => {
 };
 
 const getId = (value) => (value?._id || value)?.toString?.() || String(value || '');
+
+const expireUnansweredSession = async (session, now = new Date()) => {
+  if (!session || session.status !== 'RINGING') return false;
+  const ringingAt = session.ringingAt || session.createdAt;
+  if (!ringingAt || now.getTime() - new Date(ringingAt).getTime() < RING_TIMEOUT_MS) return false;
+
+  session.status = 'MISSED';
+  session.endedAt = now;
+  session.endedBy = null;
+  session.duration = null;
+  await session.save();
+  return true;
+};
 
 const assertAppointmentWindow = (appointment) => {
   const { start, end } = computeAppointmentWindow(appointment);
@@ -70,38 +88,25 @@ const getStreamCredentials = (session, userId, userName) => ({
   streamMembers: [getId(session.veterinarianId), getId(session.petOwnerId)].filter(Boolean),
 });
 
-const startSession = async (appointmentId, userId, userName, { restartActive = false } = {}) => {
+const startSession = async (appointmentId, userId, userName) => {
   const { appointment, veterinarianId, petOwnerId, currentUserId } = await loadAppointmentForParticipant(appointmentId, userId);
   assertAppointmentWindow(appointment);
 
   let session = await VideoSession.findOne({ appointmentId }).sort({ updatedAt: -1 });
   if (session?.status === 'RINGING') {
-    if (getId(session.initiatedBy) !== currentUserId) {
-      throw createHttpError('The other participant is already calling');
+    const expired = await expireUnansweredSession(session);
+    if (!expired) {
+      if (getId(session.initiatedBy) !== currentUserId) {
+        throw createHttpError('The other participant is already calling');
+      }
+      return getStreamCredentials(session, userId, userName);
     }
-    return getStreamCredentials(session, userId, userName);
   }
   if (session?.status === 'ACTIVE') {
-    // A browser can be closed or refreshed before its final /end request
-    // reaches us.  In that case the database would otherwise keep the
-    // appointment permanently locked as ACTIVE.  A deliberate retry from the
-    // appointment screen is allowed to close that stale call and begin a new
-    // ringing attempt, as long as the appointment window is still valid.
-    if (!restartActive) {
-      throw createHttpError('This appointment call is already active', 409);
-    }
-
-    session.status = 'ENDED';
-    session.endedAt = new Date();
-    session.endedBy = userId;
-    session.duration = session.startedAt ? Math.floor((session.endedAt - session.startedAt) / 1000) : 0;
-    await session.save();
-
-    try {
-      if (session.callId) await streamService.endCall(session.callId);
-    } catch (error) {
-      console.error('Error closing stale Stream call:', error);
-    }
+    // Never let a second create request replace an active shared call. Both
+    // participants can rejoin this session; a new call is created only after
+    // the current session is explicitly ended.
+    throw createHttpError('This appointment call is already active', 409);
   }
 
   const streamCallId = `appointment-${appointmentId}-${Date.now()}`;
@@ -140,6 +145,7 @@ const acceptSession = async (sessionId, userId, userName) => {
   const isParticipant = currentUserId === getId(session.veterinarianId) || currentUserId === getId(session.petOwnerId);
   if (!isParticipant) throw createHttpError('You are not a participant in this call', 403);
   if (getId(session.initiatedBy) === currentUserId) throw createHttpError('The caller cannot accept their own call');
+  await expireUnansweredSession(session);
   if (session.status !== 'RINGING') throw createHttpError('This call is no longer ringing');
 
   assertAppointmentWindow(appointment);
@@ -191,6 +197,7 @@ const getSessionByAppointment = async (appointmentId, userId, userName) => {
     .populate('petOwnerId', 'name fullName email profileImage')
     .sort({ updatedAt: -1 });
   if (!session) throw createHttpError('Video call not found', 404);
+  await expireUnansweredSession(session);
   return getStreamCredentials(session, userId, userName);
 };
 
@@ -208,6 +215,7 @@ const getIncomingSessions = async (userId) => {
   const activeSessions = [];
   for (const session of sessions) {
     try {
+      if (await expireUnansweredSession(session)) continue;
       assertAppointmentWindow(session.appointmentId);
       activeSessions.push(serializeSession(session, userId));
     } catch {

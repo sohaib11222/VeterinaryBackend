@@ -13,7 +13,7 @@ const serializeSessionCredentials = (result) => ({
 
 /** Start a video session for the authenticated appointment participant. */
 exports.startSession = asyncHandler(async (req, res) => {
-  const { appointmentId, restartActive = false } = req.body;
+  const { appointmentId } = req.body;
   const userId = req.userId;
   const userName = req.user?.name || req.user?.email || 'User';
 
@@ -24,8 +24,7 @@ exports.startSession = asyncHandler(async (req, res) => {
   const result = await videoSessionService.startSession(
     appointmentId,
     userId,
-    userName,
-    { restartActive: restartActive === true }
+    userName
   );
   return sendSuccess(res, 'Video session started', serializeSessionCredentials(result));
 });

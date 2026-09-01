@@ -53,6 +53,45 @@ const toPositiveInteger = (value, fallback, max) => {
   return Math.min(parsed, max);
 };
 
+const SOCIAL_LINK_KEYS = ['facebook', 'instagram', 'linkedin', 'twitter', 'website'];
+
+// Doctors can paste either a complete URL or a normal domain such as
+// "instagram.com/my-clinic". Store one safe, canonical format so public
+// profile links are always clickable and never accept executable protocols.
+const normalizeSocialLink = (value, label) => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return null;
+
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error(`${label} must be a valid website address`);
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error(`${label} must use http or https`);
+  }
+  return url.toString();
+};
+
+const normalizeSocialLinks = (socialLinks) => {
+  if (socialLinks === undefined) return undefined;
+  if (!socialLinks || Array.isArray(socialLinks) || typeof socialLinks !== 'object') {
+    throw new Error('Social links must be provided as an object');
+  }
+
+  return SOCIAL_LINK_KEYS.reduce((result, key) => {
+    const label = key === 'twitter' ? 'X / Twitter' : `${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+    result[key] = normalizeSocialLink(socialLinks[key], label);
+    return result;
+  }, {});
+};
+
 const getSpecializationFilterValues = async (specialization) => {
   const rawValue = String(specialization || '').trim();
   if (!rawValue) return [];
@@ -111,6 +150,10 @@ const upsertVeterinarianProfile = async (userId, profileData) => {
   }
   if (user.role !== 'VETERINARIAN') {
     throw new Error('User is not a veterinarian');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(profileData, 'socialLinks')) {
+    profileData.socialLinks = normalizeSocialLinks(profileData.socialLinks);
   }
 
   // Handle specializations
@@ -172,6 +215,15 @@ const upsertVeterinarianProfile = async (userId, profileData) => {
   } else {
     // Update existing profile
     Object.keys(updateData).forEach(key => {
+      // Empty social-link inputs deliberately become null. Treat them as a
+      // replacement object so a doctor can remove an already-saved link.
+      if (key === 'socialLinks' && updateData.socialLinks !== undefined) {
+        profile.set('socialLinks', {
+          ...(profile.socialLinks?.toObject?.() || profile.socialLinks || {}),
+          ...updateData.socialLinks,
+        });
+        return;
+      }
       if (updateData[key] !== undefined && updateData[key] !== null) {
         if (Array.isArray(updateData[key])) {
           // For arrays (services, clinics, education, etc.), replace the entire array
