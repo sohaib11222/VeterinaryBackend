@@ -13,7 +13,7 @@ const withdrawalRequestSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED'],
+    enum: ['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED', 'COMPLETED', 'FAILED'],
     default: 'PENDING'
   },
   requestedAt: {
@@ -39,6 +39,25 @@ const withdrawalRequestSchema = new mongoose.Schema({
   },
   paymentDetails: {
     type: String,
+    default: null
+  },
+  // Stripe Connect destination used for Pharmacy/Parapharmacy payouts. The
+  // platform secret key always remains server-side; only the public account
+  // identifier is stored with the withdrawal request.
+  stripeAccountId: {
+    type: String,
+    default: null
+  },
+  stripeTransferId: {
+    type: String,
+    default: null
+  },
+  stripePayoutFailure: {
+    type: String,
+    default: null
+  },
+  payoutProcessedAt: {
+    type: Date,
     default: null
   },
   // Withdrawal Fee Fields

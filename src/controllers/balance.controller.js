@@ -26,10 +26,11 @@ exports.topUp = asyncHandler(async (req, res) => {
  */
 exports.requestWithdrawal = asyncHandler(async (req, res) => {
   const userId = req.userId;
-  const { amount, paymentMethod, paymentDetails } = req.body;
+  const { amount, paymentMethod, paymentDetails, stripeAccountId } = req.body;
   const result = await balanceService.requestWithdrawal(userId, amount, {
     paymentMethod,
-    details: paymentDetails
+    details: paymentDetails,
+    stripeAccountId
   });
   return sendSuccess(res, 'Withdrawal request submitted successfully', result);
 });
