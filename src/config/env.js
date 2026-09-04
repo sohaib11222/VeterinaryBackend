@@ -35,9 +35,12 @@ module.exports = {
   UPLOAD_MEDICAL_RECORDS: process.env.UPLOAD_MEDICAL_RECORDS || "uploads/medical-records",
 
   // email
-  SMTP_HOST: process.env.SMTP_HOST || "smtps.aruba.it",
-  SMTP_PORT: process.env.SMTP_PORT || 465,
-  SMTP_SECURE: String(process.env.SMTP_SECURE || "true").toLowerCase() !== "false",
+  SMTP_HOST: process.env.SMTP_HOST || "smtp.aruba.it",
+  SMTP_PORT: Number(process.env.SMTP_PORT || 587),
+  SMTP_SECURE: String(
+    process.env.SMTP_SECURE ?? (Number(process.env.SMTP_PORT || 587) === 465 ? "true" : "false")
+  ).toLowerCase() === "true",
+  SMTP_REQUIRE_TLS: String(process.env.SMTP_REQUIRE_TLS || "true").toLowerCase() !== "false",
   SMTP_USER: process.env.SMTP_USER,
   SMTP_PASS: process.env.SMTP_PASS,
   SMTP_FROM: process.env.SMTP_FROM || process.env.SMTP_USER,

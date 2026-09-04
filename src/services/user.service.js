@@ -3,6 +3,7 @@ const VeterinarianSubscription = require('../models/VeterinarianSubscription');
 const VeterinarianProfile = require('../models/VeterinarianProfile');
 const Specialization = require('../models/Specialization');
 const { validateObjectId } = require('../utils/validation');
+const { sendApprovalEmail } = require('./email.service');
 
 const toSpecializationLabel = (value) =>
   String(value || '')
@@ -99,8 +100,16 @@ const updateStatus = async (userId, status) => {
     throw new Error('Invalid status');
   }
 
+  const previousStatus = user.status;
   user.status = status;
   await user.save();
+
+  const approvalRoles = ['VETERINARIAN', 'PET_STORE', 'PARAPHARMACY'];
+  if (previousStatus !== 'APPROVED' && status === 'APPROVED' && approvalRoles.includes(user.role)) {
+    await sendApprovalEmail({ name: user.name, email: user.email, role: user.role }).catch((error) => {
+      console.error('[email] Failed to send generic approval email:', error.message);
+    });
+  }
 
   const userObj = user.toObject();
   delete userObj.password;

@@ -16,8 +16,16 @@ const getTransporter = () => {
 
   transporter = nodemailer.createTransport({
     host: env.SMTP_HOST,
-    port: Number(env.SMTP_PORT || 465),
+    port: Number(env.SMTP_PORT || 587),
     secure: env.SMTP_SECURE !== false,
+    requireTLS: env.SMTP_REQUIRE_TLS !== false,
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 30000,
+    tls: {
+      minVersion: 'TLSv1.2',
+      servername: env.SMTP_HOST,
+    },
     auth: {
       user: env.SMTP_USER,
       pass: env.SMTP_PASS,
@@ -33,18 +41,36 @@ const sendEmail = async ({ to, subject, text, html }) => {
     return { skipped: true };
   }
 
-  const info = await mailer.sendMail({
-    from: {
-      address: env.SMTP_FROM || env.SMTP_USER,
-      name: env.SMTP_FROM_NAME || 'MyPetPlus',
-    },
-    to,
-    subject,
-    text,
-    html,
-  });
+  try {
+    const info = await mailer.sendMail({
+      from: {
+        address: env.SMTP_FROM || env.SMTP_USER,
+        name: env.SMTP_FROM_NAME || 'MyPetPlus',
+      },
+      to,
+      subject,
+      text,
+      html,
+    });
 
-  return { messageId: info.messageId };
+    console.log('[email] SMTP message accepted', {
+      messageId: info.messageId,
+      acceptedCount: Array.isArray(info.accepted) ? info.accepted.length : 0,
+      rejectedCount: Array.isArray(info.rejected) ? info.rejected.length : 0,
+      response: info.response,
+    });
+
+    return { messageId: info.messageId };
+  } catch (error) {
+    console.error('[email] SMTP send failed', {
+      code: error?.code,
+      command: error?.command,
+      responseCode: error?.responseCode,
+      response: error?.response,
+      message: error?.message,
+    });
+    throw error;
+  }
 };
 
 const sendWelcomeEmail = async ({ name, email }) => {
