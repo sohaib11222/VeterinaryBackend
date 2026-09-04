@@ -90,6 +90,51 @@ const orderSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  // Delivery commitment audit trail. These fields are kept independently from
+  // the general order status so delivery performance can be measured reliably.
+  requestedAt: {
+    type: Date,
+    default: Date.now
+  },
+  pharmacyAcceptedAt: {
+    type: Date,
+    default: null
+  },
+  shippingFeeAddedAt: {
+    type: Date,
+    default: null
+  },
+  customerPaidAt: {
+    type: Date,
+    default: null
+  },
+  promisedDeliveryDays: {
+    type: Number,
+    enum: [2, 3, 4, 5],
+    default: null
+  },
+  expectedDeliveryDate: {
+    type: Date,
+    default: null
+  },
+  actualDeliveredAt: {
+    type: Date,
+    default: null
+  },
+  totalActualDeliveryDays: {
+    type: Number,
+    default: null
+  },
+  deliveryStatus: {
+    type: String,
+    enum: ['AWAITING_DELIVERY', 'ON_TIME', 'DELIVERED', 'LATE'],
+    default: 'AWAITING_DELIVERY'
+  },
+  deliveryPerformance: {
+    type: String,
+    enum: ['PENDING', 'ON_TIME', 'LATE'],
+    default: 'PENDING'
+  },
   total: {
     type: Number,
     required: true
@@ -179,5 +224,8 @@ orderSchema.index({ ownerId: 1, createdAt: -1 });
 orderSchema.index({ petStoreId: 1, createdAt: -1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ orderNumber: 1 });
+orderSchema.index({ ownerId: 1, expectedDeliveryDate: 1 });
+orderSchema.index({ petStoreId: 1, expectedDeliveryDate: 1 });
+orderSchema.index({ deliveryStatus: 1, expectedDeliveryDate: 1 });
 
 module.exports = mongoose.model('Order', orderSchema);

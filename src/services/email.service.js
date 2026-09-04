@@ -293,6 +293,8 @@ const sendShippingFeeSetEmail = async ({ petOwner, pharmacy, order }) => {
   const pharmacyName = pharmacy?.name || 'the pharmacy';
   const shippingFee = Number(order?.finalShipping ?? order?.shipping ?? 0);
   const total = Number(order?.total ?? 0);
+  const promisedDeliveryDays = Number(order?.promisedDeliveryDays || 0);
+  const expectedDeliveryDate = formatDate(order?.expectedDeliveryDate);
   const address = [
     order?.shippingAddress?.line1,
     order?.shippingAddress?.line2,
@@ -304,7 +306,7 @@ const sendShippingFeeSetEmail = async ({ petOwner, pharmacy, order }) => {
   return sendEmail({
     to: petOwner.email,
     subject: `Shipping fee set for order ${order?.orderNumber || ''}`.trim(),
-    text: `Hi ${patientName},\n\n${pharmacyName} has set the shipping fee for your order.\n\nOrder: ${order?.orderNumber || order?._id}\nShipping fee: ${formatAmount(shippingFee)}\nUpdated total: ${formatAmount(total)}\n\nYou can now complete payment in your MyPetPlus panel. The order will continue processing after payment is received.\n\nThe MyPetPlus Team`,
+    text: `Hi ${patientName},\n\n${pharmacyName} has set the shipping fee for your order.\n\nOrder: ${order?.orderNumber || order?._id}\nShipping fee: ${formatAmount(shippingFee)}\nUpdated total: ${formatAmount(total)}\nEstimated delivery: ${promisedDeliveryDays ? `${promisedDeliveryDays} Days` : '2-5 Days'}\nExpected delivery date: ${expectedDeliveryDate}\n\nYou can now complete payment in your MyPetPlus panel. The order will continue processing after payment is received.\n\nThe MyPetPlus Team`,
     html: emailLayout({
       title: 'Your order is ready for payment',
       preview: `The shipping fee for your order has been set.`,
@@ -314,6 +316,8 @@ const sendShippingFeeSetEmail = async ({ petOwner, pharmacy, order }) => {
           ['Order reference', order?.orderNumber || order?._id],
           ['Shipping fee', formatAmount(shippingFee)],
           ['Updated total', formatAmount(total)],
+          ['Pharmacy delivery commitment', promisedDeliveryDays ? `${promisedDeliveryDays} Days` : '2-5 Days'],
+          ['Expected delivery date', expectedDeliveryDate],
           ['Delivery address', address || 'Not specified'],
         ])}
         <div style="padding:14px 16px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:8px;font-size:14px;line-height:1.6;color:#1f2937;">Your order will continue processing once payment has been received.</div>`,

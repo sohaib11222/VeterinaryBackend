@@ -5,9 +5,58 @@ const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { ORDER_STATUS, PAYMENT_STATUS } = require('../types/enums');
 const { sendNewOrderEmail, sendShippingFeeSetEmail } = require('./email.service');
+const {
+  DELIVERY_DAY_OPTIONS,
+  DELIVERY_STATUS,
+  DELIVERY_PERFORMANCE,
+  isValidDeliveryDays,
+  calculateExpectedDeliveryDate,
+  deriveDeliveryMonitoring,
+} = require('../utils/deliveryMonitoring');
 
 const logEmailFailure = (event, error) => {
   console.error(`[email] Failed to send ${event} email:`, error?.message || error);
+};
+
+const DELIVERY_SELECT_FIELDS = 'requestedAt pharmacyAcceptedAt shippingFeeAddedAt customerPaidAt promisedDeliveryDays expectedDeliveryDate actualDeliveredAt totalActualDeliveryDays deliveryStatus deliveryPerformance deliveredAt';
+
+// A late delivery is derived every time an order is read, so no scheduled job
+// is required. The latest derived state is also persisted for reporting.
+const refreshDeliveryMonitoring = async (orders) => {
+  if (!Array.isArray(orders) || orders.length === 0) return orders || [];
+
+  const now = new Date();
+  const operations = [];
+  const monitoredOrders = orders.map((order) => {
+    const monitoring = deriveDeliveryMonitoring(order, now);
+    const changed =
+      order.deliveryStatus !== monitoring.deliveryStatus ||
+      order.deliveryPerformance !== monitoring.deliveryPerformance ||
+      order.totalActualDeliveryDays !== monitoring.totalActualDeliveryDays;
+
+    if (changed && order?._id) {
+      operations.push({
+        updateOne: {
+          filter: { _id: order._id },
+          update: {
+            $set: {
+              deliveryStatus: monitoring.deliveryStatus,
+              deliveryPerformance: monitoring.deliveryPerformance,
+              totalActualDeliveryDays: monitoring.totalActualDeliveryDays,
+            },
+          },
+        },
+      });
+    }
+
+    return { ...order, ...monitoring };
+  });
+
+  if (operations.length) {
+    await Order.bulkWrite(operations, { ordered: false });
+  }
+
+  return monitoredOrders;
 };
 
 const resolveVariant = (product, variantId) => {
@@ -173,6 +222,7 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
 
   const createdOrders = [];
   for (const petStoreData of Array.from(petStoreMap.values())) {
+    const requestedAt = new Date();
     const orderItems = petStoreData.items;
     const orderSubtotal = orderItems.reduce((sum, i) => sum + (Number(i.total) || 0), 0);
     const tax = 0;
@@ -194,7 +244,8 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
       shippingAddress: resolvedShippingAddress,
       paymentMethod: null,
       status: ORDER_STATUS.PENDING,
-      paymentStatus: PAYMENT_STATUS.UNPAID
+      paymentStatus: PAYMENT_STATUS.UNPAID,
+      requestedAt,
     });
 
     const pharmacy = await User.findById(petStoreData.ownerId)
@@ -231,8 +282,8 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
  * Get order by ID
  */
 const getOrderById = async (orderId, userId, userRole) => {
-  const order = await Order.findById(orderId)
-    .select('petOwnerId petStoreId ownerId items transactionId status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt shippingAddress notes')
+  let order = await Order.findById(orderId)
+    .select(`petOwnerId petStoreId ownerId items transactionId status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt shippingAddress notes ${DELIVERY_SELECT_FIELDS}`)
     .lean()
     .maxTimeMS(2000);
 
@@ -248,6 +299,8 @@ const getOrderById = async (orderId, userId, userRole) => {
   if ((userRole === 'PET_STORE' || userRole === 'PARAPHARMACY') && order.ownerId?.toString() !== userId.toString()) {
     throw new Error('Unauthorized: You can only view orders for your pet store');
   }
+
+  [order] = await refreshDeliveryMonitoring([order]);
 
   // Populate separately
   const [petOwner, petStore, owner, products, transaction] = await Promise.all([
@@ -302,9 +355,9 @@ const getPetOwnerOrders = async (petOwnerId, options = {}) => {
     query.paymentStatus = paymentStatus.toUpperCase();
   }
 
-  const [ordersRaw, total] = await Promise.all([
+  let [ordersRaw, total] = await Promise.all([
     Order.find(query)
-      .select('petStoreId ownerId items status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt')
+      .select(`petStoreId ownerId items status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt ${DELIVERY_SELECT_FIELDS}`)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -312,6 +365,8 @@ const getPetOwnerOrders = async (petOwnerId, options = {}) => {
       .maxTimeMS(3000),
     Order.countDocuments(query).maxTimeMS(2000)
   ]);
+
+  ordersRaw = await refreshDeliveryMonitoring(ordersRaw);
 
   // Populate separately
   const storeIds = [...new Set(ordersRaw.map(o => o.petStoreId?.toString()).filter(Boolean))];
@@ -378,9 +433,9 @@ const getPetStoreOrders = async (ownerId, options = {}) => {
     query.paymentStatus = paymentStatus.toUpperCase();
   }
 
-  const [ordersRaw, total] = await Promise.all([
+  let [ordersRaw, total] = await Promise.all([
     Order.find(query)
-      .select('petOwnerId petStoreId ownerId items status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt')
+      .select(`petOwnerId petStoreId ownerId items status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt ${DELIVERY_SELECT_FIELDS}`)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -388,6 +443,8 @@ const getPetStoreOrders = async (ownerId, options = {}) => {
       .maxTimeMS(3000),
     Order.countDocuments(query).maxTimeMS(2000)
   ]);
+
+  ordersRaw = await refreshDeliveryMonitoring(ordersRaw);
 
   // Populate separately
   const petOwnerIds = [...new Set(ordersRaw.map(o => o.petOwnerId?.toString()).filter(Boolean))];
@@ -460,9 +517,9 @@ const getAllOrders = async (options = {}) => {
     query.paymentStatus = paymentStatus.toUpperCase();
   }
 
-  const [ordersRaw, total] = await Promise.all([
+  let [ordersRaw, total] = await Promise.all([
     Order.find(query)
-      .select('petOwnerId petStoreId ownerId items status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt')
+      .select(`petOwnerId petStoreId ownerId items status paymentStatus total subtotal tax shipping initialShipping finalShipping initialTotal shippingUpdatedAt requiresPaymentUpdate createdAt ${DELIVERY_SELECT_FIELDS}`)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -470,6 +527,8 @@ const getAllOrders = async (options = {}) => {
       .maxTimeMS(3000),
     Order.countDocuments(query).maxTimeMS(2000)
   ]);
+
+  ordersRaw = await refreshDeliveryMonitoring(ordersRaw);
 
   // Populate separately
   const petOwnerIds = [...new Set(ordersRaw.map(o => o.petOwnerId?.toString()).filter(Boolean))];
@@ -530,6 +589,96 @@ const getAllOrders = async (options = {}) => {
 };
 
 /**
+ * Delivery commitment report for Pet Admin. A late, undelivered order is
+ * included as late immediately after its saved expected delivery date.
+ */
+const getDeliveryPerformance = async () => {
+  let orders = await Order.find({})
+    .select(`petStoreId ownerId status ${DELIVERY_SELECT_FIELDS}`)
+    .lean()
+    .maxTimeMS(10000);
+
+  orders = await refreshDeliveryMonitoring(orders);
+
+  const storeIds = [...new Set(orders.map((order) => order.petStoreId?.toString()).filter(Boolean))];
+  const ownerIds = [...new Set(orders.map((order) => order.ownerId?.toString()).filter(Boolean))];
+  const [stores, owners] = await Promise.all([
+    storeIds.length
+      ? PetStore.find({ _id: { $in: storeIds } }).select('name ownerId').lean().maxTimeMS(3000)
+      : Promise.resolve([]),
+    ownerIds.length
+      ? User.find({ _id: { $in: ownerIds } }).select('name role').lean().maxTimeMS(3000)
+      : Promise.resolve([]),
+  ]);
+
+  const storeMap = new Map(stores.map((store) => [String(store._id), store]));
+  const ownerMap = new Map(owners.map((owner) => [String(owner._id), owner]));
+  const reportByStore = new Map();
+
+  orders.forEach((order) => {
+    if (['CANCELLED', 'REFUNDED'].includes(String(order.status || '').toUpperCase())) return;
+
+    const storeId = String(order.petStoreId || order.ownerId || 'unknown');
+    const store = storeMap.get(storeId);
+    const owner = ownerMap.get(String(order.ownerId || store?.ownerId || ''));
+    const current = reportByStore.get(storeId) || {
+      petStoreId: storeId === 'unknown' ? null : storeId,
+      pharmacyName: store?.name || owner?.name || 'Unassigned pharmacy',
+      storeType: String(owner?.role || '').toUpperCase() === 'PARAPHARMACY' ? 'Parapharmacy' : 'Pharmacy',
+      totalOrders: 0,
+      onTimeOrders: 0,
+      lateOrders: 0,
+      awaitingDeliveryOrders: 0,
+      deliveredOrders: 0,
+      deliveryDays: [],
+    };
+
+    current.totalOrders += 1;
+    if (order.actualDeliveredAt || order.deliveredAt) {
+      current.deliveredOrders += 1;
+      if (Number.isFinite(Number(order.totalActualDeliveryDays))) {
+        current.deliveryDays.push(Number(order.totalActualDeliveryDays));
+      }
+    }
+
+    if (order.deliveryPerformance === DELIVERY_PERFORMANCE.ON_TIME) {
+      current.onTimeOrders += 1;
+    } else if (order.deliveryStatus === DELIVERY_STATUS.LATE) {
+      current.lateOrders += 1;
+    } else if (order.expectedDeliveryDate) {
+      current.awaitingDeliveryOrders += 1;
+    }
+
+    reportByStore.set(storeId, current);
+  });
+
+  const pharmacies = Array.from(reportByStore.values())
+    .map(({ deliveryDays, ...report }) => {
+      const completedForPerformance = report.onTimeOrders + report.lateOrders;
+      return {
+        ...report,
+        averageDeliveryTime: deliveryDays.length
+          ? Number((deliveryDays.reduce((sum, days) => sum + days, 0) / deliveryDays.length).toFixed(1))
+          : null,
+        onTimeDeliveryPercentage: completedForPerformance
+          ? Number(((report.onTimeOrders / completedForPerformance) * 100).toFixed(1))
+          : null,
+      };
+    })
+    .sort((a, b) => b.lateOrders - a.lateOrders || b.totalOrders - a.totalOrders || a.pharmacyName.localeCompare(b.pharmacyName));
+
+  return {
+    pharmacies,
+    summary: {
+      totalOrders: pharmacies.reduce((sum, pharmacy) => sum + pharmacy.totalOrders, 0),
+      onTimeOrders: pharmacies.reduce((sum, pharmacy) => sum + pharmacy.onTimeOrders, 0),
+      lateOrders: pharmacies.reduce((sum, pharmacy) => sum + pharmacy.lateOrders, 0),
+      awaitingDeliveryOrders: pharmacies.reduce((sum, pharmacy) => sum + pharmacy.awaitingDeliveryOrders, 0),
+    },
+  };
+};
+
+/**
  * Update order status
  */
 const updateOrderStatus = async (orderId, status, userId, userRole) => {
@@ -559,7 +708,14 @@ const updateOrderStatus = async (orderId, status, userId, userRole) => {
   order.status = status.toUpperCase();
 
   if (status.toUpperCase() === 'DELIVERED') {
-    order.deliveredAt = new Date();
+    const deliveredAt = new Date();
+    order.deliveredAt = deliveredAt;
+    order.actualDeliveredAt = deliveredAt;
+
+    const monitoring = deriveDeliveryMonitoring(order, deliveredAt);
+    order.deliveryStatus = monitoring.deliveryStatus;
+    order.deliveryPerformance = monitoring.deliveryPerformance;
+    order.totalActualDeliveryDays = monitoring.totalActualDeliveryDays;
   }
 
   await order.save();
@@ -569,7 +725,7 @@ const updateOrderStatus = async (orderId, status, userId, userRole) => {
 /**
  * Update shipping fee
  */
-const updateShippingFee = async (orderId, shippingFee, userId, userRole) => {
+const updateShippingFee = async (orderId, shippingFee, deliveryDays, userId, userRole) => {
   const order = await Order.findById(orderId);
 
   if (!order) {
@@ -588,14 +744,26 @@ const updateShippingFee = async (orderId, shippingFee, userId, userRole) => {
     throw new Error('Shipping fee must be a non-negative number');
   }
 
+  if (!isValidDeliveryDays(deliveryDays)) {
+    throw new Error(`Expected delivery time is required and must be one of: ${DELIVERY_DAY_OPTIONS.join(', ')} days`);
+  }
+
   const finalShipping = shippingFee;
   const finalTotal = (Number(order.subtotal) || 0) + finalShipping;
+  const shippingFeeAddedAt = new Date();
 
   order.tax = 0;
   order.shipping = finalShipping;
   order.finalShipping = finalShipping;
   order.total = finalTotal;
-  order.shippingUpdatedAt = new Date();
+  order.shippingUpdatedAt = shippingFeeAddedAt;
+  order.pharmacyAcceptedAt = order.pharmacyAcceptedAt || shippingFeeAddedAt;
+  order.shippingFeeAddedAt = shippingFeeAddedAt;
+  order.promisedDeliveryDays = Number(deliveryDays);
+  order.expectedDeliveryDate = calculateExpectedDeliveryDate(shippingFeeAddedAt, deliveryDays);
+  order.deliveryStatus = DELIVERY_STATUS.ON_TIME;
+  order.deliveryPerformance = DELIVERY_PERFORMANCE.PENDING;
+  order.totalActualDeliveryDays = null;
   order.requiresPaymentUpdate = false;
 
   await order.save();
@@ -701,6 +869,7 @@ const payForOrder = async (orderId, userId, userRole, paymentMethod = 'DUMMY') =
   order.status = 'CONFIRMED';
   order.paymentMethod = paymentMethod;
   order.transactionId = transaction._id;
+  order.customerPaidAt = new Date();
   await order.save();
 
   // Reduce product stock
@@ -780,6 +949,7 @@ module.exports = {
   getPetOwnerOrders,
   getPetStoreOrders,
   getAllOrders,
+  getDeliveryPerformance,
   updateOrderStatus,
   updateShippingFee,
   payForOrder,

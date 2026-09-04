@@ -46,6 +46,17 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Delivery performance report (Pet Admin only)
+ */
+exports.deliveryPerformance = asyncHandler(async (req, res) => {
+  if (req.userRole !== 'ADMIN') {
+    throw new Error('Unauthorized: Only administrators can view delivery performance');
+  }
+  const result = await orderService.getDeliveryPerformance();
+  return sendSuccess(res, 'OK', result);
+});
+
+/**
  * Update order status
  */
 exports.updateStatus = asyncHandler(async (req, res) => {
@@ -63,10 +74,11 @@ exports.updateStatus = asyncHandler(async (req, res) => {
  * Update shipping fee
  */
 exports.updateShippingFee = asyncHandler(async (req, res) => {
-  const { shippingFee } = req.body;
+  const { shippingFee, deliveryDays } = req.body;
   const result = await orderService.updateShippingFee(
     req.params.id,
     shippingFee,
+    deliveryDays,
     req.userId,
     req.userRole
   );

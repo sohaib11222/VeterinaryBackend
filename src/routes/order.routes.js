@@ -17,6 +17,11 @@ router.post('/', asyncHandler(orderController.create));
 router.get('/', asyncHandler(orderController.list));
 
 /**
+ * Delivery performance report (must be before /:id)
+ */
+router.get('/delivery-performance', asyncHandler(orderController.deliveryPerformance));
+
+/**
  * Get order by ID
  */
 router.get('/:id', asyncHandler(orderController.getById));
