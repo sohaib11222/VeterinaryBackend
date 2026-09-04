@@ -4,7 +4,7 @@ const PetStore = require('../models/PetStore');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { ORDER_STATUS, PAYMENT_STATUS } = require('../types/enums');
-const { sendNewOrderEmail } = require('./email.service');
+const { sendNewOrderEmail, sendShippingFeeSetEmail } = require('./email.service');
 
 const logEmailFailure = (event, error) => {
   console.error(`[email] Failed to send ${event} email:`, error?.message || error);
@@ -599,6 +599,32 @@ const updateShippingFee = async (orderId, shippingFee, userId, userRole) => {
   order.requiresPaymentUpdate = false;
 
   await order.save();
+
+  const [petOwner, pharmacy, petStore] = await Promise.all([
+    User.findById(order.petOwnerId)
+      .select('name email')
+      .lean()
+      .maxTimeMS(1000),
+    User.findById(order.ownerId)
+      .select('name email')
+      .lean()
+      .maxTimeMS(1000),
+    PetStore.findById(order.petStoreId)
+      .select('name')
+      .lean()
+      .maxTimeMS(1000),
+  ]);
+
+  // The fee is saved even if a transient SMTP failure occurs; the patient can
+  // still see and pay the updated total in the order panel.
+  if (petOwner?.email) {
+    await sendShippingFeeSetEmail({
+      petOwner,
+      pharmacy: { ...pharmacy, name: petStore?.name || pharmacy?.name },
+      order,
+    }).catch((error) => logEmailFailure('shipping fee update', error));
+  }
+
   return order;
 };
 

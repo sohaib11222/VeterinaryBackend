@@ -8,6 +8,7 @@ router.post('/', asyncHandler(controller.create));
 router.get('/', authGuard(['ADMIN']), asyncHandler(controller.list));
 router.get('/:id', authGuard(['ADMIN']), asyncHandler(controller.getById));
 router.patch('/:id', authGuard(['ADMIN']), asyncHandler(controller.update));
+router.post('/:id/resolve', authGuard(['ADMIN']), asyncHandler(controller.resolve));
 router.delete('/:id', authGuard(['ADMIN']), asyncHandler(controller.remove));
 
 module.exports = router;

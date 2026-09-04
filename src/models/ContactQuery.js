@@ -46,6 +46,16 @@ const contactQuerySchema = new mongoose.Schema({
     trim: true,
     maxlength: 5000,
   },
+  resolutionMessage: {
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 5000,
+  },
+  responseSentAt: {
+    type: Date,
+    default: null,
+  },
   resolvedAt: {
     type: Date,
     default: null,

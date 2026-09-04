@@ -1,5 +1,6 @@
 const BlogPost = require('../models/BlogPost');
 const User = require('../models/User');
+const { sanitizeRichText } = require('../utils/richText');
 
 /**
  * Create blog post
@@ -8,6 +9,7 @@ const User = require('../models/User');
  */
 const createBlogPost = async (data) => {
   const { title, content, slug, coverImage, featuredImage, tags, isPublished, publishedAt, authorId } = data;
+  const sanitizedContent = sanitizeRichText(content);
 
   const normalizedCoverImage = coverImage || featuredImage || null;
   const normalizedFeaturedImage = featuredImage || coverImage || null;
@@ -29,7 +31,7 @@ const createBlogPost = async (data) => {
 
   const blogPost = await BlogPost.create({
     title,
-    content,
+    content: sanitizedContent,
     slug: generatedSlug,
     coverImage: normalizedCoverImage,
     featuredImage: normalizedFeaturedImage,
@@ -49,6 +51,11 @@ const createBlogPost = async (data) => {
  * @returns {Promise<Object>} Updated blog post
  */
 const updateBlogPost = async (id, data) => {
+  const updateData = { ...data };
+  if (Object.prototype.hasOwnProperty.call(updateData, 'content')) {
+    updateData.content = sanitizeRichText(updateData.content);
+  }
+
   const blogPost = await BlogPost.findById(id);
   
   if (!blogPost) {
@@ -56,35 +63,35 @@ const updateBlogPost = async (id, data) => {
   }
 
   // Check slug uniqueness if updating
-  if (data.slug) {
+  if (updateData.slug) {
     const existing = await BlogPost.findOne({
       _id: { $ne: id },
-      slug: data.slug
+      slug: updateData.slug
     });
     if (existing) {
       throw new Error('Blog post with this slug already exists');
     }
   }
 
-  const hasCover = Object.prototype.hasOwnProperty.call(data, 'coverImage');
-  const hasFeatured = Object.prototype.hasOwnProperty.call(data, 'featuredImage');
+  const hasCover = Object.prototype.hasOwnProperty.call(updateData, 'coverImage');
+  const hasFeatured = Object.prototype.hasOwnProperty.call(updateData, 'featuredImage');
 
-  Object.keys(data).forEach(key => {
-    if (data[key] !== undefined) {
-      if (key === 'publishedAt' && data[key]) {
-        blogPost[key] = new Date(data[key]);
+  Object.keys(updateData).forEach(key => {
+    if (updateData[key] !== undefined) {
+      if (key === 'publishedAt' && updateData[key]) {
+        blogPost[key] = new Date(updateData[key]);
       } else {
-        blogPost[key] = data[key];
+        blogPost[key] = updateData[key];
       }
     }
   });
 
   if (hasCover && !hasFeatured) {
-    blogPost.featuredImage = data.coverImage || null;
+    blogPost.featuredImage = updateData.coverImage || null;
   }
 
   if (hasFeatured && !hasCover) {
-    blogPost.coverImage = data.featuredImage || null;
+    blogPost.coverImage = updateData.featuredImage || null;
   }
 
   await blogPost.save();

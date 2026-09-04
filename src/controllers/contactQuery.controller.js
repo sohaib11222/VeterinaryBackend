@@ -22,6 +22,11 @@ exports.update = asyncHandler(async (req, res) => {
   return sendSuccess(res, 'Contact query updated successfully', result);
 });
 
+exports.resolve = asyncHandler(async (req, res) => {
+  const result = await contactQueryService.resolveContactQuery(req.params.id, req.body, req.userId);
+  return sendSuccess(res, 'Contact query resolved and response email sent successfully', result);
+});
+
 exports.remove = asyncHandler(async (req, res) => {
   const result = await contactQueryService.deleteContactQuery(req.params.id);
   return sendSuccess(res, 'Contact query deleted successfully', result);

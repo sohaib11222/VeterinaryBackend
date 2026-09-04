@@ -288,6 +288,62 @@ const sendNewOrderEmail = async ({ pharmacy, customer, order, products }) => {
   });
 };
 
+const sendShippingFeeSetEmail = async ({ petOwner, pharmacy, order }) => {
+  const patientName = petOwner?.name || 'there';
+  const pharmacyName = pharmacy?.name || 'the pharmacy';
+  const shippingFee = Number(order?.finalShipping ?? order?.shipping ?? 0);
+  const total = Number(order?.total ?? 0);
+  const address = [
+    order?.shippingAddress?.line1,
+    order?.shippingAddress?.line2,
+    [order?.shippingAddress?.zip, order?.shippingAddress?.city].filter(Boolean).join(' '),
+    order?.shippingAddress?.state,
+    order?.shippingAddress?.country,
+  ].filter(Boolean).join(', ');
+
+  return sendEmail({
+    to: petOwner.email,
+    subject: `Shipping fee set for order ${order?.orderNumber || ''}`.trim(),
+    text: `Hi ${patientName},\n\n${pharmacyName} has set the shipping fee for your order.\n\nOrder: ${order?.orderNumber || order?._id}\nShipping fee: ${formatAmount(shippingFee)}\nUpdated total: ${formatAmount(total)}\n\nYou can now complete payment in your MyPetPlus panel. The order will continue processing after payment is received.\n\nThe MyPetPlus Team`,
+    html: emailLayout({
+      title: 'Your order is ready for payment',
+      preview: `The shipping fee for your order has been set.`,
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(patientName)},</p>
+        <p style="font-size:15px;line-height:1.65;">${escapeHtml(pharmacyName)} has set the shipping fee for your order. You can now complete payment in your MyPetPlus panel.</p>
+        ${detailsTable([
+          ['Order reference', order?.orderNumber || order?._id],
+          ['Shipping fee', formatAmount(shippingFee)],
+          ['Updated total', formatAmount(total)],
+          ['Delivery address', address || 'Not specified'],
+        ])}
+        <div style="padding:14px 16px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:8px;font-size:14px;line-height:1.6;color:#1f2937;">Your order will continue processing once payment has been received.</div>`,
+    }),
+  });
+};
+
+const sendContactQueryResolutionEmail = async ({ query, responseMessage }) => {
+  const recipientName = query?.name || 'there';
+  const responseHtml = escapeHtml(responseMessage).replace(/\r?\n/g, '<br />');
+
+  return sendEmail({
+    to: query.email,
+    subject: 'Response to your MyPetPlus enquiry',
+    text: `Hi ${recipientName},\n\nThank you for contacting MyPetPlus.\n\n${responseMessage}\n\nThe MyPetPlus Team`,
+    html: emailLayout({
+      title: 'Response to your enquiry',
+      preview: 'MyPetPlus has responded to your Contact Us enquiry.',
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(recipientName)},</p>
+        <p style="font-size:15px;line-height:1.65;">Thank you for contacting MyPetPlus. Our team has reviewed your enquiry and provided the response below.</p>
+        <div style="margin:20px 0;padding:18px;background:#f8fafc;border-left:4px solid #2d92b5;border-radius:4px;font-size:15px;line-height:1.7;color:#1f2937;">${responseHtml}</div>
+        ${detailsTable([
+          ['Your requested service', query?.services || 'Not specified'],
+          ['Your original message', query?.message || 'Not specified'],
+        ])}
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;margin-bottom:0;">If you need further assistance, please submit another enquiry and our team will be happy to help.</p>`,
+    }),
+  });
+};
+
 module.exports = {
   sendEmail,
   sendWelcomeEmail,
@@ -296,4 +352,6 @@ module.exports = {
   sendAppointmentBookedEmail,
   sendAppointmentStatusEmail,
   sendNewOrderEmail,
+  sendShippingFeeSetEmail,
+  sendContactQueryResolutionEmail,
 };

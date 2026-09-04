@@ -1,5 +1,6 @@
 const { ContactQuery, CONTACT_QUERY_STATUSES } = require('../models/ContactQuery');
 const { validateObjectId } = require('../utils/validation');
+const { sendContactQueryResolutionEmail } = require('./email.service');
 
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -104,6 +105,43 @@ const updateContactQuery = async (id, data = {}, adminId) => {
   return query;
 };
 
+const resolveContactQuery = async (id, data = {}, adminId) => {
+  validateObjectId(id, 'Contact query ID');
+  const responseMessage = String(data.responseMessage || '').trim();
+  if (!responseMessage || responseMessage.length > 5000) {
+    throw new Error('A response email between 1 and 5000 characters is required');
+  }
+
+  const adminNotes = data.adminNotes === undefined ? undefined : String(data.adminNotes || '').trim();
+  if (adminNotes !== undefined && adminNotes.length > 5000) {
+    throw new Error('Admin notes are too long');
+  }
+
+  const query = await ContactQuery.findById(id).maxTimeMS(3000);
+  if (!query) throw new Error('Contact query not found');
+  if (query.status === 'RESOLVED') {
+    throw new Error('This Contact Us query has already been resolved');
+  }
+
+  const delivery = await sendContactQueryResolutionEmail({ query, responseMessage });
+  if (delivery?.skipped) {
+    throw new Error('Email delivery is not configured');
+  }
+
+  query.status = 'RESOLVED';
+  query.resolutionMessage = responseMessage;
+  query.responseSentAt = new Date();
+  query.resolvedAt = new Date();
+  query.resolvedBy = adminId;
+  if (adminNotes !== undefined) {
+    query.adminNotes = adminNotes;
+  }
+
+  await query.save();
+  await query.populate('resolvedBy', 'name email');
+  return query.toObject();
+};
+
 const deleteContactQuery = async (id) => {
   validateObjectId(id, 'Contact query ID');
   const deleted = await ContactQuery.findByIdAndDelete(id).lean().maxTimeMS(3000);
@@ -116,5 +154,6 @@ module.exports = {
   listContactQueries,
   getContactQuery,
   updateContactQuery,
+  resolveContactQuery,
   deleteContactQuery,
 };
