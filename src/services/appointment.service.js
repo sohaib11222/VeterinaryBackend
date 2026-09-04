@@ -10,10 +10,18 @@ const vaccinationService = require('./vaccination.service');
 const weightRecordService = require('./weightRecord.service');
 const subscriptionPolicy = require('./subscriptionPolicy.service');
 const {
+  sendAppointmentBookedEmail,
+  sendAppointmentStatusEmail,
+} = require('./email.service');
+const {
   getAppointmentDateParts,
   getTimeZoneOffsetMinutes,
   isIanaTimeZone,
 } = require('../utils/appointmentTime');
+
+const logEmailFailure = (event, error) => {
+  console.error(`[email] Failed to send ${event} email:`, error?.message || error);
+};
 
 /**
  * Create appointment
@@ -195,8 +203,19 @@ const createAppointment = async (data) => {
     })
   ]);
 
+  // Email delivery must never undo a successful booking. The in-app
+  // notification remains available if an SMTP provider has a temporary issue.
+  if (veterinarian.email) {
+    await sendAppointmentBookedEmail({
+      veterinarian,
+      petOwner,
+      pet,
+      appointment,
+    }).catch((error) => logEmailFailure('new appointment', error));
+  }
+
   const createdAppointment = await Appointment.findById(appointment._id)
-    .select('veterinarianId petOwnerId petId appointmentDate appointmentTime consultationFee status')
+    .select('veterinarianId petOwnerId petId appointmentDate appointmentTime consultationFee appointmentNumber bookingType reason status')
     .lean()
     .maxTimeMS(2000);
 
@@ -345,7 +364,7 @@ const updateAppointmentStatus = async (id, statusData) => {
  */
 const acceptAppointment = async (appointmentId, veterinarianId) => {
   const appointment = await Appointment.findById(appointmentId)
-    .select('veterinarianId petOwnerId petId status')
+    .select('veterinarianId petOwnerId petId appointmentDate appointmentTime appointmentNumber bookingType reason petSymptoms clinicName status')
     .lean()
     .maxTimeMS(2000);
   
@@ -369,11 +388,11 @@ const acceptAppointment = async (appointmentId, veterinarianId) => {
   // Get populated data separately
   const [vet, owner, pet] = await Promise.all([
     User.findById(veterinarianId)
-      .select('name')
+      .select('name email')
       .lean()
       .maxTimeMS(1000),
     User.findById(appointment.petOwnerId)
-      .select('name')
+      .select('name email')
       .lean()
       .maxTimeMS(1000),
     Pet.findById(appointment.petId)
@@ -389,6 +408,16 @@ const acceptAppointment = async (appointmentId, veterinarianId) => {
     type: 'APPOINTMENT',
     data: { appointmentId: appointment._id }
   });
+
+  if (owner?.email) {
+    await sendAppointmentStatusEmail({
+      petOwner: owner,
+      veterinarian: vet,
+      pet,
+      appointment,
+      status: 'CONFIRMED',
+    }).catch((error) => logEmailFailure('appointment acceptance', error));
+  }
 
   return {
     ...appointmentDoc.toObject(),
@@ -434,6 +463,17 @@ const rejectAppointment = async (appointmentId, veterinarianId, reason = null) =
     type: 'APPOINTMENT',
     data: { appointmentId: appointment._id }
   });
+
+  if (petOwner?.email) {
+    await sendAppointmentStatusEmail({
+      petOwner,
+      veterinarian,
+      pet,
+      appointment,
+      status: 'REJECTED',
+      reason,
+    }).catch((error) => logEmailFailure('appointment rejection', error));
+  }
 
   return appointment;
 };

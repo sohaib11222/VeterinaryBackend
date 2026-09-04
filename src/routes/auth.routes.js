@@ -13,6 +13,8 @@ router.post('/reset-password', asyncHandler(authController.resetPassword));
 
 // Protected routes
 router.post('/change-password', authGuard(), asyncHandler(authController.changePassword));
+router.post('/change-password/request-code', authGuard(), asyncHandler(authController.requestChangePasswordCode));
+router.post('/change-password/verify-code', authGuard(), asyncHandler(authController.verifyChangePasswordCode));
 router.post('/refresh-token', asyncHandler(authController.refreshToken));
 
 router.post('/phone-otp/send', authGuard(['VETERINARIAN', 'PET_STORE', 'PARAPHARMACY']), asyncHandler(authController.sendPhoneOtp));

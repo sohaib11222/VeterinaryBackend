@@ -46,8 +46,23 @@ exports.resetPassword = asyncHandler(async (req, res) => {
  * Change password (authenticated user)
  */
 exports.changePassword = asyncHandler(async (req, res) => {
-  await authService.changePassword(req.userId, req.body.oldPassword, req.body.newPassword);
+  await authService.changePassword(
+    req.userId,
+    req.body.oldPassword,
+    req.body.newPassword,
+    req.body.code
+  );
   return sendSuccess(res, 'Password changed successfully');
+});
+
+exports.requestChangePasswordCode = asyncHandler(async (req, res) => {
+  await authService.requestChangePasswordCode(req.userId);
+  return sendSuccess(res, 'Password verification code sent to your email address');
+});
+
+exports.verifyChangePasswordCode = asyncHandler(async (req, res) => {
+  const result = await authService.verifyChangePasswordCode(req.userId, req.body.code);
+  return sendSuccess(res, 'Verification code confirmed', result);
 });
 
 /**

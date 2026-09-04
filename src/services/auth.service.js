@@ -1,11 +1,16 @@
 const User = require('../models/User');
 const VeterinarianProfile = require('../models/VeterinarianProfile');
+const PasswordReset = require('../models/PasswordReset');
+const crypto = require('crypto');
 const { generateToken, generateRefreshToken } = require('../utils/jwt');
 const { USER_ROLES, USER_STATUS } = require('../types/enums');
-const { sendError } = require('../utils/response');
 const { validateObjectId } = require('../utils/validation');
 const { sendPhoneOtp, verifyPhoneOtp } = require('./twilioVerify.service');
-const { sendWelcomeEmail, sendApprovalEmail } = require('./email.service');
+const {
+  sendWelcomeEmail,
+  sendApprovalEmail,
+  sendPasswordVerificationCodeEmail,
+} = require('./email.service');
 
 const isE164Phone = (phone) => {
   const t = String(phone || '').trim();
@@ -19,6 +24,95 @@ const PHONE_VERIFICATION_ROLES = [
 ];
 
 const requiresPhoneVerification = (role) => PHONE_VERIFICATION_ROLES.includes(String(role || '').toUpperCase());
+
+const PASSWORD_RESET_PURPOSE = 'PASSWORD_RESET';
+const PASSWORD_CHANGE_PURPOSE = 'PASSWORD_CHANGE';
+const PASSWORD_CODE_TTL_MS = 10 * 60 * 1000;
+
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+
+const normalizeVerificationCode = (code) => String(code || '').trim();
+
+const hashVerificationCode = (code) => crypto
+  .createHash('sha256')
+  .update(normalizeVerificationCode(code))
+  .digest('hex');
+
+const generateVerificationCode = () => String(crypto.randomInt(100000, 1000000));
+
+const validateNewPassword = (password) => {
+  if (typeof password !== 'string' || password.length < 8) {
+    throw new Error('New password must be at least 8 characters long');
+  }
+};
+
+const codesMatch = (storedHash, code) => {
+  const candidate = Buffer.from(hashVerificationCode(code), 'utf8');
+  const stored = Buffer.from(String(storedHash || ''), 'utf8');
+  return stored.length === candidate.length && crypto.timingSafeEqual(stored, candidate);
+};
+
+const issuePasswordVerificationCode = async (user, purpose) => {
+  if (!user?.email) {
+    throw new Error('This account does not have an email address for verification');
+  }
+
+  const email = normalizeEmail(user.email);
+  const code = generateVerificationCode();
+
+  await PasswordReset.deleteMany({
+    email,
+    purpose,
+    isUsed: false,
+  });
+
+  const verification = await PasswordReset.create({
+    userId: user._id,
+    email,
+    purpose,
+    code: hashVerificationCode(code),
+    expiresAt: new Date(Date.now() + PASSWORD_CODE_TTL_MS),
+  });
+
+  try {
+    const delivery = await sendPasswordVerificationCodeEmail({
+      name: user.name,
+      email,
+      code,
+      purpose: purpose === PASSWORD_CHANGE_PURPOSE ? 'change' : 'reset',
+    });
+
+    if (delivery?.skipped) {
+      throw new Error('Email delivery is not configured');
+    }
+  } catch (error) {
+    await PasswordReset.deleteOne({ _id: verification._id });
+    throw new Error(error?.message || 'Failed to send verification code');
+  }
+};
+
+const findValidPasswordCode = async (email, purpose, code, userId = null) => {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedCode = normalizeVerificationCode(code);
+  if (!normalizedEmail || !/^\d{6}$/.test(normalizedCode)) {
+    return null;
+  }
+
+  const query = {
+    email: normalizedEmail,
+    purpose,
+    isUsed: false,
+    expiresAt: { $gt: new Date() },
+  };
+  if (userId) query.userId = userId;
+
+  const verification = await PasswordReset.findOne(query)
+    .sort({ createdAt: -1 });
+
+  return verification && codesMatch(verification.code, normalizedCode)
+    ? verification
+    : null;
+};
 
 /**
  * Register new user
@@ -282,19 +376,36 @@ const login = async (data) => {
 /**
  * Change password
  */
-const changePassword = async (userId, oldPassword, newPassword) => {
-  const { validateObjectId } = require('../utils/validation');
+const changePassword = async (userId, oldPassword, newPassword, verificationCode = null) => {
   validateObjectId(userId, 'User ID');
-  
   const user = await User.findById(userId).select('+password');
 
   if (!user) {
     throw new Error('User not found');
   }
 
-  const isMatch = await user.comparePassword(oldPassword);
-  if (!isMatch) {
-    throw new Error('Current password is incorrect');
+  validateNewPassword(newPassword);
+
+  if (verificationCode) {
+    const verification = await findValidPasswordCode(
+      user.email,
+      PASSWORD_CHANGE_PURPOSE,
+      verificationCode,
+      user._id
+    );
+    if (!verification) {
+      throw new Error('Invalid or expired verification code');
+    }
+    if (!verification.verifiedAt) {
+      throw new Error('Verify the code before changing your password');
+    }
+    verification.isUsed = true;
+    await verification.save();
+  } else {
+    const isMatch = await user.comparePassword(oldPassword);
+    if (!isMatch) {
+      throw new Error('Current password is incorrect');
+    }
   }
 
   user.password = newPassword;
@@ -305,24 +416,32 @@ const changePassword = async (userId, oldPassword, newPassword) => {
  * Forgot password - Send reset code
  */
 const forgotPassword = async (email) => {
-  const user = await User.findOne({ email });
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    throw new Error('Email address is required');
+  }
+
+  const user = await User.findOne({ email: normalizedEmail });
 
   if (!user) {
     // Don't reveal if user exists
     return;
   }
 
-  // TODO: Implement OTP generation and email sending
-  // For now, just return success
-  return;
+  await issuePasswordVerificationCode(user, PASSWORD_RESET_PURPOSE);
 };
 
 /**
  * Verify reset code
  */
 const verifyResetCode = async (email, code) => {
-  // TODO: Implement OTP verification
-  // For now, return a temporary token
+  const verification = await findValidPasswordCode(email, PASSWORD_RESET_PURPOSE, code);
+  if (!verification) {
+    throw new Error('Invalid or expired verification code');
+  }
+
+  verification.verifiedAt = new Date();
+  await verification.save();
   return { verified: true };
 };
 
@@ -330,15 +449,61 @@ const verifyResetCode = async (email, code) => {
  * Reset password
  */
 const resetPassword = async (email, code, newPassword) => {
-  // TODO: Implement password reset with OTP verification
-  const user = await User.findOne({ email });
+  const normalizedEmail = normalizeEmail(email);
+  validateNewPassword(newPassword);
+  const user = await User.findOne({ email: normalizedEmail }).select('+password');
 
+  if (!user) {
+    throw new Error('Invalid or expired verification code');
+  }
+
+  const verification = await findValidPasswordCode(
+    normalizedEmail,
+    PASSWORD_RESET_PURPOSE,
+    code,
+    user._id
+  );
+  if (!verification) {
+    throw new Error('Invalid or expired verification code');
+  }
+  if (!verification.verifiedAt) {
+    throw new Error('Verify the code before setting a new password');
+  }
+
+  user.password = newPassword;
+  verification.isUsed = true;
+  await Promise.all([user.save(), verification.save()]);
+};
+
+const requestChangePasswordCode = async (userId) => {
+  validateObjectId(userId, 'User ID');
+  const user = await User.findById(userId).maxTimeMS(2000);
+  if (!user) {
+    throw new Error('User not found');
+  }
+  await issuePasswordVerificationCode(user, PASSWORD_CHANGE_PURPOSE);
+};
+
+const verifyChangePasswordCode = async (userId, code) => {
+  validateObjectId(userId, 'User ID');
+  const user = await User.findById(userId).maxTimeMS(2000);
   if (!user) {
     throw new Error('User not found');
   }
 
-  user.password = newPassword;
-  await user.save();
+  const verification = await findValidPasswordCode(
+    user.email,
+    PASSWORD_CHANGE_PURPOSE,
+    code,
+    user._id
+  );
+  if (!verification) {
+    throw new Error('Invalid or expired verification code');
+  }
+
+  verification.verifiedAt = new Date();
+  await verification.save();
+  return { verified: true };
 };
 
 /**
@@ -416,6 +581,8 @@ module.exports = {
   forgotPassword,
   verifyResetCode,
   resetPassword,
+  requestChangePasswordCode,
+  verifyChangePasswordCode,
   refreshToken,
   approveVeterinarian,
   rejectVeterinarian,

@@ -4,6 +4,11 @@ const PetStore = require('../models/PetStore');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { ORDER_STATUS, PAYMENT_STATUS } = require('../types/enums');
+const { sendNewOrderEmail } = require('./email.service');
+
+const logEmailFailure = (event, error) => {
+  console.error(`[email] Failed to send ${event} email:`, error?.message || error);
+};
 
 const resolveVariant = (product, variantId) => {
   const variants = Array.isArray(product?.variants) ? product.variants : [];
@@ -147,6 +152,7 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
       petStoreMap.set(storeId, {
         petStoreId: petStore._id,
         ownerId: petStore.ownerId,
+        name: petStore.name,
         items: []
       });
     }
@@ -190,6 +196,30 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
       status: ORDER_STATUS.PENDING,
       paymentStatus: PAYMENT_STATUS.UNPAID
     });
+
+    const pharmacy = await User.findById(petStoreData.ownerId)
+      .select('name email')
+      .lean()
+      .maxTimeMS(1000);
+    const orderedProducts = orderItems.map((orderItem) => {
+      const product = products.find((item) => String(item._id) === String(orderItem.productId));
+      return {
+        name: product?.name || 'Product',
+        variantName: orderItem.variantName,
+        quantity: orderItem.quantity,
+        total: orderItem.total,
+      };
+    });
+
+    // Order creation must succeed even if SMTP is temporarily unavailable.
+    if (pharmacy?.email) {
+      await sendNewOrderEmail({
+        pharmacy: { ...pharmacy, name: petStoreData.name || pharmacy.name },
+        customer: petOwner,
+        order,
+        products: orderedProducts,
+      }).catch((error) => logEmailFailure('new order', error));
+    }
 
     createdOrders.push(order);
   }
