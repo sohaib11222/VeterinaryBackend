@@ -16,6 +16,7 @@ const InsuranceCompany = require('../models/InsuranceCompany');
 const Specialization = require('../models/Specialization');
 const Vaccine = require('../models/Vaccine');
 const SupportTicket = require('../models/SupportTicket');
+const { ContactQuery } = require('../models/ContactQuery');
 
 /**
  * Get dashboard statistics
@@ -119,6 +120,8 @@ const getSidebarIndicators = async () => {
     pendingWithdrawalCount,
     supportTickets,
     unreadSupportTicketCount,
+    contactQueries,
+    newContactQueryCount,
   ] = await Promise.all([
     latestCreatedAt(User),
     latestCreatedAt(User, { role: 'VETERINARIAN' }),
@@ -144,6 +147,8 @@ const getSidebarIndicators = async () => {
     WithdrawalRequest.countDocuments({ status: 'PENDING' }).maxTimeMS(2000),
     latestUpdatedAt(SupportTicket),
     SupportTicket.countDocuments({ unreadForAdmin: true }).maxTimeMS(2000),
+    latestCreatedAt(ContactQuery),
+    ContactQuery.countDocuments({ status: 'NEW' }).maxTimeMS(2000),
   ]);
 
   return {
@@ -180,6 +185,10 @@ const getSidebarIndicators = async () => {
       supportTickets: {
         latestAt: supportTickets,
         pendingCount: unreadSupportTicketCount,
+      },
+      contactQueries: {
+        latestAt: contactQueries,
+        pendingCount: newContactQueryCount,
       },
     },
   };

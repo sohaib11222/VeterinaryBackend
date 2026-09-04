@@ -5,6 +5,7 @@ const { USER_ROLES, USER_STATUS } = require('../types/enums');
 const { sendError } = require('../utils/response');
 const { validateObjectId } = require('../utils/validation');
 const { sendPhoneOtp, verifyPhoneOtp } = require('./twilioVerify.service');
+const { sendWelcomeEmail, sendApprovalEmail } = require('./email.service');
 
 const isE164Phone = (phone) => {
   const t = String(phone || '').trim();
@@ -75,6 +76,12 @@ const register = async (data) => {
     // Link profile to user
     user.veterinarianProfile = veterinarianProfile._id;
     await user.save();
+  }
+
+  if (normalizedRole === USER_ROLES.PET_OWNER) {
+    await sendWelcomeEmail({ name: user.name, email: user.email }).catch((error) => {
+      console.error('[email] Failed to send pet owner welcome email:', error.message);
+    });
   }
 
   // Generate tokens
@@ -196,6 +203,10 @@ const approvePetStoreUser = async (userId) => {
 
   user.status = USER_STATUS.APPROVED;
   await user.save();
+
+  await sendApprovalEmail({ name: user.name, email: user.email, role: user.role }).catch((error) => {
+    console.error('[email] Failed to send pharmacy approval email:', error.message);
+  });
 
   return user;
 };
@@ -371,6 +382,12 @@ const approveVeterinarian = async (veterinarianId) => {
   if (!updated) {
     throw new Error('Veterinarian not found');
   }
+
+  await sendApprovalEmail({ name: updated.name, email: updated.email, role: updated.role }).catch((error) => {
+    console.error('[email] Failed to send veterinarian approval email:', error.message);
+  });
+
+  return updated;
 };
 
 /**

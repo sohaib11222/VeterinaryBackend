@@ -35,10 +35,13 @@ module.exports = {
   UPLOAD_MEDICAL_RECORDS: process.env.UPLOAD_MEDICAL_RECORDS || "uploads/medical-records",
 
   // email
-  SMTP_HOST: process.env.SMTP_HOST,
-  SMTP_PORT: process.env.SMTP_PORT,
+  SMTP_HOST: process.env.SMTP_HOST || "smtps.aruba.it",
+  SMTP_PORT: process.env.SMTP_PORT || 465,
+  SMTP_SECURE: String(process.env.SMTP_SECURE || "true").toLowerCase() !== "false",
   SMTP_USER: process.env.SMTP_USER,
   SMTP_PASS: process.env.SMTP_PASS,
+  SMTP_FROM: process.env.SMTP_FROM || process.env.SMTP_USER,
+  SMTP_FROM_NAME: process.env.SMTP_FROM_NAME || "MyPetPlus",
 
   // payment
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,

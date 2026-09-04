@@ -48,5 +48,7 @@ router.use('/mapping', require('./mapping.routes'));
 router.use('/crm', require('./crm.routes'));
 router.use('/announcements', require('./announcement.routes'));
 router.use('/support-tickets', require('./supportTicket.routes'));
+router.use('/footer-options', require('./footerOption.routes'));
+router.use('/contact-queries', require('./contactQuery.routes'));
 
 module.exports = router;
