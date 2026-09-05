@@ -1,6 +1,270 @@
 const User = require('../models/User');
 const Appointment = require('../models/Appointment');
 const Order = require('../models/Order');
+const VeterinarianProfile = require('../models/VeterinarianProfile');
+const PetStore = require('../models/PetStore');
+const VeterinarianSubscription = require('../models/VeterinarianSubscription');
+const PetStoreSubscription = require('../models/PetStoreSubscription');
+const SubscriptionPlan = require('../models/SubscriptionPlan');
+const { USER_ROLES } = require('../types/enums');
+
+const MAX_LEAD_PAGE_SIZE = 100;
+
+const text = (value) => String(value || '').trim();
+const escapeRegex = (value) => text(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const contains = (value) => new RegExp(escapeRegex(value), 'i');
+
+const parsePositiveInt = (value, fallback, max) => {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, max);
+};
+
+const createAddressConditions = (prefix, filters) => {
+  const conditions = [];
+  if (filters.city) conditions.push({ [`${prefix}city`]: contains(filters.city) });
+  if (filters.country) conditions.push({ [`${prefix}country`]: contains(filters.country) });
+  if (filters.region) conditions.push({ [`${prefix}state`]: contains(filters.region) });
+  if (filters.area) {
+    conditions.push({
+      $or: [
+        { [`${prefix}line1`]: contains(filters.area) },
+        { [`${prefix}line2`]: contains(filters.area) },
+      ],
+    });
+  }
+  return conditions;
+};
+
+const uniqueSorted = (values) => [...new Set(values.map((value) => text(value)).filter(Boolean))]
+  .sort((a, b) => a.localeCompare(b));
+
+const mapSubscription = (subscription, plansById) => {
+  if (!subscription) return null;
+  const planId = subscription.subscriptionPlanId?.toString();
+  const plan = planId ? plansById.get(planId) : null;
+  return {
+    planName: plan?.name || null,
+    planType: plan?.planType || null,
+    status: subscription.isActive && new Date(subscription.endDate) > new Date() ? 'ACTIVE' : 'EXPIRED',
+    startDate: subscription.startDate || null,
+    endDate: subscription.endDate || null,
+  };
+};
+
+/**
+ * Filterable, safe registration feed for the LeoX24 MyPet Plus Leads page.
+ * It keeps the legacy getCrmData endpoint unchanged and returns only the
+ * registration/business fields that the CRM needs to display and filter leads.
+ */
+const getCrmLeads = async (filters = {}) => {
+  const page = parsePositiveInt(filters.page, 1, Number.MAX_SAFE_INTEGER);
+  const limit = parsePositiveInt(filters.limit, 25, MAX_LEAD_PAGE_SIZE);
+  const normalized = {
+    search: text(filters.search),
+    name: text(filters.name),
+    email: text(filters.email).toLowerCase(),
+    role: text(filters.role).toUpperCase(),
+    status: text(filters.status).toUpperCase(),
+    specialization: text(filters.specialization),
+    city: text(filters.city),
+    country: text(filters.country),
+    area: text(filters.area),
+    region: text(filters.region),
+    documentType: text(filters.documentType).toUpperCase(),
+  };
+
+  const queryParts = [];
+  if (normalized.role && Object.values(USER_ROLES).includes(normalized.role)) {
+    queryParts.push({ role: normalized.role });
+  }
+  if (normalized.status) queryParts.push({ status: normalized.status });
+  if (normalized.name) {
+    queryParts.push({
+      $or: [
+        { name: contains(normalized.name) },
+        { fullName: contains(normalized.name) },
+      ],
+    });
+  }
+  if (normalized.email) queryParts.push({ email: contains(normalized.email) });
+
+  if (normalized.specialization) {
+    const matchingProfiles = await VeterinarianProfile.find({
+      specializations: contains(normalized.specialization),
+    }).select('userId').lean().maxTimeMS(3000);
+    queryParts.push({ _id: { $in: matchingProfiles.map((profile) => profile.userId) } });
+  }
+
+  if (normalized.documentType) {
+    const documentMatches = [{ 'documentUploads.type': normalized.documentType }];
+    if (normalized.documentType === 'LICENSE_DOCUMENT') {
+      const licensedProfiles = await VeterinarianProfile.find({
+        licenseDocument: { $exists: true, $nin: [null, ''] },
+      }).select('userId').lean().maxTimeMS(3000);
+      if (licensedProfiles.length > 0) {
+        documentMatches.push({ _id: { $in: licensedProfiles.map((profile) => profile.userId) } });
+      }
+    }
+    queryParts.push({ $or: documentMatches });
+  }
+
+  const locationFiltersPresent = [normalized.city, normalized.country, normalized.region, normalized.area]
+    .some(Boolean);
+  if (locationFiltersPresent) {
+    const userAddressConditions = createAddressConditions('address.', normalized);
+    const storeAddressConditions = createAddressConditions('address.', normalized);
+    const matchingStores = await PetStore.find(
+      storeAddressConditions.length === 1 ? storeAddressConditions[0] : { $and: storeAddressConditions }
+    ).select('ownerId').lean().maxTimeMS(3000);
+
+    const alternatives = [];
+    if (userAddressConditions.length > 0) {
+      alternatives.push(userAddressConditions.length === 1 ? userAddressConditions[0] : { $and: userAddressConditions });
+    }
+    if (matchingStores.length > 0) {
+      alternatives.push({ _id: { $in: matchingStores.map((store) => store.ownerId) } });
+    }
+    queryParts.push(alternatives.length === 1 ? alternatives[0] : { $or: alternatives });
+  }
+
+  if (normalized.search) {
+    const matchingStores = await PetStore.find({
+      $or: [
+        { name: contains(normalized.search) },
+        { phone: contains(normalized.search) },
+      ],
+    }).select('ownerId').lean().maxTimeMS(3000);
+    queryParts.push({
+      $or: [
+        { name: contains(normalized.search) },
+        { fullName: contains(normalized.search) },
+        { email: contains(normalized.search) },
+        { phone: contains(normalized.search) },
+        ...(matchingStores.length > 0 ? [{ _id: { $in: matchingStores.map((store) => store.ownerId) } }] : []),
+      ],
+    });
+  }
+
+  const userQuery = queryParts.length === 0 ? {} : { $and: queryParts };
+  const users = await User.find(userQuery)
+    .select('name fullName email phone role status address isEmailVerified isPhoneVerified documentUploads createdAt updatedAt')
+    .sort({ createdAt: -1 })
+    .lean()
+    .maxTimeMS(10000);
+
+  const userIds = users.map((user) => user._id);
+  const [profiles, petStores, veterinarianSubscriptions, petStoreSubscriptions] = userIds.length > 0
+    ? await Promise.all([
+      VeterinarianProfile.find({ userId: { $in: userIds } })
+        .select('userId specializations experienceYears licenseDocument isVerified profileCompleted clinics')
+        .lean().maxTimeMS(5000),
+      PetStore.find({ ownerId: { $in: userIds } })
+        .select('ownerId name phone address isActive profileCompleted isPublic')
+        .lean().maxTimeMS(5000),
+      VeterinarianSubscription.find({ veterinarianId: { $in: userIds }, isActive: true })
+        .sort({ endDate: -1, createdAt: -1 }).lean().maxTimeMS(5000),
+      PetStoreSubscription.find({ petStoreOwnerId: { $in: userIds }, isActive: true })
+        .sort({ endDate: -1, createdAt: -1 }).lean().maxTimeMS(5000),
+    ])
+    : [[], [], [], []];
+
+  const profilesByUserId = new Map(profiles.map((profile) => [profile.userId.toString(), profile]));
+  const storesByOwnerId = new Map(petStores.map((store) => [store.ownerId?.toString(), store]));
+  const veterinarianSubscriptionsByUserId = new Map();
+  veterinarianSubscriptions.forEach((subscription) => {
+    const id = subscription.veterinarianId?.toString();
+    if (id && !veterinarianSubscriptionsByUserId.has(id)) veterinarianSubscriptionsByUserId.set(id, subscription);
+  });
+  const petStoreSubscriptionsByUserId = new Map();
+  petStoreSubscriptions.forEach((subscription) => {
+    const id = subscription.petStoreOwnerId?.toString();
+    if (id && !petStoreSubscriptionsByUserId.has(id)) petStoreSubscriptionsByUserId.set(id, subscription);
+  });
+
+  const subscriptionPlanIds = uniqueSorted([
+    ...veterinarianSubscriptions.map((subscription) => subscription.subscriptionPlanId?.toString()),
+    ...petStoreSubscriptions.map((subscription) => subscription.subscriptionPlanId?.toString()),
+  ]);
+  const plans = subscriptionPlanIds.length > 0
+    ? await SubscriptionPlan.find({ _id: { $in: subscriptionPlanIds } }).select('name planType').lean().maxTimeMS(3000)
+    : [];
+  const plansById = new Map(plans.map((plan) => [plan._id.toString(), plan]));
+
+  const leads = users.map((user) => {
+    const userId = user._id.toString();
+    const veterinarian = profilesByUserId.get(userId) || null;
+    const petStore = storesByOwnerId.get(userId) || null;
+    const documents = (Array.isArray(user.documentUploads) ? user.documentUploads : [])
+      .map((document) => text(document?.type).toUpperCase())
+      .filter(Boolean);
+    if (veterinarian?.licenseDocument && !documents.includes('LICENSE_DOCUMENT')) {
+      documents.push('LICENSE_DOCUMENT');
+    }
+
+    const address = petStore?.address || user.address || {};
+    const subscription = user.role === USER_ROLES.VETERINARIAN
+      ? mapSubscription(veterinarianSubscriptionsByUserId.get(userId), plansById)
+      : mapSubscription(petStoreSubscriptionsByUserId.get(userId), plansById);
+
+    return {
+      id: userId,
+      name: user.fullName || user.name || null,
+      email: user.email || null,
+      phone: user.phone || petStore?.phone || null,
+      role: user.role,
+      status: user.status,
+      registrationType: user.role,
+      emailVerified: Boolean(user.isEmailVerified),
+      phoneVerified: Boolean(user.isPhoneVerified),
+      city: address?.city || null,
+      country: address?.country || null,
+      region: address?.state || null,
+      area: address?.line2 || address?.line1 || null,
+      specializations: veterinarian?.specializations || [],
+      veterinarian: veterinarian ? {
+        experienceYears: veterinarian.experienceYears || null,
+        isVerified: Boolean(veterinarian.isVerified),
+        profileCompleted: Boolean(veterinarian.profileCompleted),
+      } : null,
+      business: petStore ? {
+        name: petStore.name || null,
+        isActive: Boolean(petStore.isActive),
+        profileCompleted: Boolean(petStore.profileCompleted),
+        isPublic: Boolean(petStore.isPublic),
+      } : null,
+      documentTypes: uniqueSorted(documents),
+      subscription,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  });
+
+  const filterOptions = {
+    roles: uniqueSorted(leads.map((lead) => lead.role)),
+    statuses: uniqueSorted(leads.map((lead) => lead.status)),
+    specializations: uniqueSorted(leads.flatMap((lead) => lead.specializations || [])),
+    cities: uniqueSorted(leads.map((lead) => lead.city)),
+    countries: uniqueSorted(leads.map((lead) => lead.country)),
+    regions: uniqueSorted(leads.map((lead) => lead.region)),
+    areas: uniqueSorted(leads.map((lead) => lead.area)),
+    documentTypes: uniqueSorted(leads.flatMap((lead) => lead.documentTypes || [])),
+  };
+
+  const total = leads.length;
+  const start = (page - 1) * limit;
+  return {
+    users: leads.slice(start, start + limit),
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    },
+    filterOptions,
+    generatedAt: new Date().toISOString(),
+  };
+};
 
 /**
  * Get comprehensive CRM data for external CRM system
@@ -152,5 +416,6 @@ const getCrmData = async (filters = {}) => {
 };
 
 module.exports = {
-  getCrmData
+  getCrmData,
+  getCrmLeads,
 };

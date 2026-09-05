@@ -69,6 +69,10 @@ module.exports = {
   TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID,
   TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN,
   TWILIO_VERIFY_SERVICE_SID: process.env.TWILIO_VERIFY_SERVICE_SID,
+
+  // LeoX24 CRM integration. This is a server-to-server key only; never expose
+  // it in either the public website or the CRM frontend.
+  CRM_API_KEY: process.env.CRM_API_KEY || '',
 };
 
 // Warn if Stream credentials are missing (but don't fail startup)

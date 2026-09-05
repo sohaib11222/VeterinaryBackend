@@ -18,3 +18,13 @@ exports.getCrmData = asyncHandler(async (req, res) => {
   const result = await crmService.getCrmData(filters);
   return sendSuccess(res, 'OK', result);
 });
+
+/**
+ * Registration-only feed for LeoX24's MyPet Plus Leads module.
+ * This intentionally excludes passwords, document URLs, medical records,
+ * appointments, orders, and other private clinical information.
+ */
+exports.getCrmLeads = asyncHandler(async (req, res) => {
+  const result = await crmService.getCrmLeads(req.query || {});
+  return sendSuccess(res, 'OK', result);
+});
