@@ -177,6 +177,25 @@ const sendPasswordVerificationCodeEmail = async ({ name, email, code, purpose = 
   });
 };
 
+const sendEmailVerificationCodeEmail = async ({ name, email, code }) => {
+  const displayName = name || 'there';
+  const safeCode = escapeHtml(code);
+
+  return sendEmail({
+    to: email,
+    subject: 'Verify your MyPetPlus email address',
+    text: `Hi ${displayName},\n\nUse this verification code to activate your MyPetPlus account: ${code}\n\nThis code expires in 10 minutes. If you did not create this account, you can safely ignore this email.\n\nThe MyPetPlus Team`,
+    html: emailLayout({
+      title: 'Verify your email address',
+      preview: `Your MyPetPlus verification code is ${code}`,
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(displayName)},</p>
+        <p style="font-size:15px;line-height:1.65;">Thanks for joining MyPetPlus. Enter the verification code below to activate your pet owner account.</p>
+        <div style="margin:24px 0;padding:18px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:10px;text-align:center;font-size:30px;letter-spacing:8px;font-weight:700;color:#1d5b8f;">${safeCode}</div>
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;">This code expires in 10 minutes and can only be used once. If you did not create this account, you can safely ignore this email.</p>`,
+    }),
+  });
+};
+
 const sendAppointmentBookedEmail = async ({ veterinarian, petOwner, pet, appointment }) => {
   const doctorName = veterinarian?.name || 'Doctor';
   const patientName = petOwner?.name || 'A patient';
@@ -353,6 +372,7 @@ module.exports = {
   sendWelcomeEmail,
   sendApprovalEmail,
   sendPasswordVerificationCodeEmail,
+  sendEmailVerificationCodeEmail,
   sendAppointmentBookedEmail,
   sendAppointmentStatusEmail,
   sendNewOrderEmail,

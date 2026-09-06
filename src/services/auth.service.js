@@ -10,6 +10,7 @@ const {
   sendWelcomeEmail,
   sendApprovalEmail,
   sendPasswordVerificationCodeEmail,
+  sendEmailVerificationCodeEmail,
 } = require('./email.service');
 
 const isE164Phone = (phone) => {
@@ -27,6 +28,7 @@ const requiresPhoneVerification = (role) => PHONE_VERIFICATION_ROLES.includes(St
 
 const PASSWORD_RESET_PURPOSE = 'PASSWORD_RESET';
 const PASSWORD_CHANGE_PURPOSE = 'PASSWORD_CHANGE';
+const EMAIL_VERIFICATION_PURPOSE = 'EMAIL_VERIFICATION';
 const PASSWORD_CODE_TTL_MS = 10 * 60 * 1000;
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
@@ -52,7 +54,7 @@ const codesMatch = (storedHash, code) => {
   return stored.length === candidate.length && crypto.timingSafeEqual(stored, candidate);
 };
 
-const issuePasswordVerificationCode = async (user, purpose) => {
+const issueVerificationCode = async (user, purpose) => {
   if (!user?.email) {
     throw new Error('This account does not have an email address for verification');
   }
@@ -75,12 +77,14 @@ const issuePasswordVerificationCode = async (user, purpose) => {
   });
 
   try {
-    const delivery = await sendPasswordVerificationCodeEmail({
-      name: user.name,
-      email,
-      code,
-      purpose: purpose === PASSWORD_CHANGE_PURPOSE ? 'change' : 'reset',
-    });
+    const delivery = purpose === EMAIL_VERIFICATION_PURPOSE
+      ? await sendEmailVerificationCodeEmail({ name: user.name, email, code })
+      : await sendPasswordVerificationCodeEmail({
+        name: user.name,
+        email,
+        code,
+        purpose: purpose === PASSWORD_CHANGE_PURPOSE ? 'change' : 'reset',
+      });
 
     if (delivery?.skipped) {
       throw new Error('Email delivery is not configured');
@@ -90,6 +94,8 @@ const issuePasswordVerificationCode = async (user, purpose) => {
     throw new Error(error?.message || 'Failed to send verification code');
   }
 };
+
+const issuePasswordVerificationCode = (user, purpose) => issueVerificationCode(user, purpose);
 
 const findValidPasswordCode = async (email, purpose, code, userId = null) => {
   const normalizedEmail = normalizeEmail(email);
@@ -126,6 +132,29 @@ const register = async (data) => {
   });
 
   if (existingUser) {
+    // A user who submitted the pet-owner form but did not finish email
+    // verification can safely restart the flow and receive a fresh code.
+    if (
+      existingUser.role === USER_ROLES.PET_OWNER &&
+      existingUser.emailVerificationRequired &&
+      !existingUser.isEmailVerified &&
+      normalizeEmail(existingUser.email) === normalizeEmail(email)
+    ) {
+      await issueVerificationCode(existingUser, EMAIL_VERIFICATION_PURPOSE);
+      return {
+        requiresEmailVerification: true,
+        email: existingUser.email,
+        user: {
+          id: existingUser._id,
+          name: existingUser.name,
+          email: existingUser.email,
+          phone: existingUser.phone,
+          role: existingUser.role,
+          status: existingUser.status,
+          isEmailVerified: existingUser.isEmailVerified,
+        },
+      };
+    }
     throw new Error('User with this email or phone already exists');
   }
 
@@ -134,7 +163,8 @@ const register = async (data) => {
   const isParapharmacy = normalizedRole === USER_ROLES.PARAPHARMACY;
   const isVeterinarian = normalizedRole === USER_ROLES.VETERINARIAN;
 
-  let status = USER_STATUS.APPROVED;
+  const requiresEmailVerification = normalizedRole === USER_ROLES.PET_OWNER;
+  let status = requiresEmailVerification ? USER_STATUS.PENDING : USER_STATUS.APPROVED;
   if ([USER_ROLES.VETERINARIAN, USER_ROLES.PET_STORE, USER_ROLES.PARAPHARMACY].includes(normalizedRole)) {
     status = USER_STATUS.PENDING;
   }
@@ -151,6 +181,8 @@ const register = async (data) => {
     role: normalizedRole,
     status,
     isPhoneVerified: false,
+    isEmailVerified: !requiresEmailVerification,
+    emailVerificationRequired: requiresEmailVerification,
   });
 
   if (requiresPhoneVerification(normalizedRole)) {
@@ -172,10 +204,27 @@ const register = async (data) => {
     await user.save();
   }
 
-  if (normalizedRole === USER_ROLES.PET_OWNER) {
-    await sendWelcomeEmail({ name: user.name, email: user.email }).catch((error) => {
-      console.error('[email] Failed to send pet owner welcome email:', error.message);
-    });
+  if (requiresEmailVerification) {
+    try {
+      await issueVerificationCode(user, EMAIL_VERIFICATION_PURPOSE);
+    } catch (error) {
+      await User.deleteOne({ _id: user._id });
+      throw error;
+    }
+
+    return {
+      requiresEmailVerification: true,
+      email: user.email,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        status: user.status,
+        isEmailVerified: user.isEmailVerified,
+      },
+    };
   }
 
   // Generate tokens
@@ -198,10 +247,72 @@ const register = async (data) => {
       role: user.role,
       status: user.status,
       isPhoneVerified: user.isPhoneVerified,
+      isEmailVerified: user.isEmailVerified,
     },
     token,
     refreshToken
   };
+};
+
+const verifyEmail = async (email, code) => {
+  const normalizedEmail = normalizeEmail(email);
+  const verification = await findValidPasswordCode(
+    normalizedEmail,
+    EMAIL_VERIFICATION_PURPOSE,
+    code
+  );
+  if (!verification) {
+    throw new Error('Invalid or expired verification code');
+  }
+
+  const user = await User.findById(verification.userId);
+  if (!user || user.role !== USER_ROLES.PET_OWNER) {
+    throw new Error('Pet owner account not found');
+  }
+
+  user.isEmailVerified = true;
+  user.emailVerificationRequired = false;
+  user.status = USER_STATUS.APPROVED;
+  verification.isUsed = true;
+  await Promise.all([user.save(), verification.save()]);
+
+  await sendWelcomeEmail({ name: user.name, email: user.email }).catch((error) => {
+    console.error('[email] Failed to send pet owner welcome email:', error.message);
+  });
+
+  const token = generateToken({
+    userId: user._id.toString(),
+    email: user.email,
+    role: user.role,
+  });
+  const refreshToken = generateRefreshToken({ userId: user._id.toString() });
+
+  return {
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      status: user.status,
+      isPhoneVerified: user.isPhoneVerified,
+      isEmailVerified: user.isEmailVerified,
+    },
+    token,
+    refreshToken,
+  };
+};
+
+const resendEmailVerification = async (email) => {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) throw new Error('Email address is required');
+
+  const user = await User.findOne({ email: normalizedEmail });
+  if (!user || user.role !== USER_ROLES.PET_OWNER || !user.emailVerificationRequired || user.isEmailVerified) {
+    return;
+  }
+
+  await issueVerificationCode(user, EMAIL_VERIFICATION_PURPOSE);
 };
 
 const sendPhoneOtpForUser = async (userId, phone = null) => {
@@ -341,6 +452,10 @@ const login = async (data) => {
     throw new Error('Account is blocked. Please contact admin');
   }
 
+  if (user.role === USER_ROLES.PET_OWNER && user.emailVerificationRequired && !user.isEmailVerified) {
+    throw new Error('Please verify your email address before logging in');
+  }
+
   // Check password
   const isMatch = await user.comparePassword(password);
   if (!isMatch) {
@@ -367,6 +482,7 @@ const login = async (data) => {
       role: user.role,
       status: user.status,
       isPhoneVerified: user.isPhoneVerified,
+      isEmailVerified: user.isEmailVerified,
     },
     token,
     refreshToken
@@ -579,6 +695,8 @@ module.exports = {
   login,
   changePassword,
   forgotPassword,
+  verifyEmail,
+  resendEmailVerification,
   verifyResetCode,
   resetPassword,
   requestChangePasswordCode,

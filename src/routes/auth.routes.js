@@ -6,6 +6,8 @@ const asyncHandler = require('../middleware/asyncHandler');
 
 // Public routes
 router.post('/register', asyncHandler(authController.register));
+router.post('/verify-email', asyncHandler(authController.verifyEmail));
+router.post('/resend-email-verification', asyncHandler(authController.resendEmailVerification));
 router.post('/login', asyncHandler(authController.login));
 router.post('/forgot-password', asyncHandler(authController.forgotPassword));
 router.post('/verify-reset-code', asyncHandler(authController.verifyResetCode));

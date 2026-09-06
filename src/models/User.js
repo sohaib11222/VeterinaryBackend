@@ -54,6 +54,12 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // New pet-owner registrations must verify their email before activation.
+  // Kept separate from isEmailVerified so existing accounts remain usable.
+  emailVerificationRequired: {
+    type: Boolean,
+    default: false
+  },
   isPhoneVerified: {
     type: Boolean,
     default: false

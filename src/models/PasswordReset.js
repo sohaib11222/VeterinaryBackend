@@ -14,7 +14,7 @@ const passwordResetSchema = new mongoose.Schema({
   },
   purpose: {
     type: String,
-    enum: ['PASSWORD_RESET', 'PASSWORD_CHANGE'],
+    enum: ['PASSWORD_RESET', 'PASSWORD_CHANGE', 'EMAIL_VERIFICATION'],
     default: 'PASSWORD_RESET'
   },
   code: {

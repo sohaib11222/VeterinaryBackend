@@ -7,7 +7,20 @@ const { sendSuccess, sendError } = require('../utils/response');
  */
 exports.register = asyncHandler(async (req, res) => {
   const result = await authService.register(req.body);
-  return sendSuccess(res, 'Registration successful', result, 201);
+  const message = result?.requiresEmailVerification
+    ? 'Verification code sent to your email address'
+    : 'Registration successful';
+  return sendSuccess(res, message, result, 201);
+});
+
+exports.verifyEmail = asyncHandler(async (req, res) => {
+  const result = await authService.verifyEmail(req.body.email, req.body.code);
+  return sendSuccess(res, 'Email verified successfully', result);
+});
+
+exports.resendEmailVerification = asyncHandler(async (req, res) => {
+  await authService.resendEmailVerification(req.body.email);
+  return sendSuccess(res, 'If the account is waiting for verification, a new code has been sent');
 });
 
 /**
