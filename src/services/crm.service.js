@@ -6,6 +6,7 @@ const PetStore = require('../models/PetStore');
 const VeterinarianSubscription = require('../models/VeterinarianSubscription');
 const PetStoreSubscription = require('../models/PetStoreSubscription');
 const SubscriptionPlan = require('../models/SubscriptionPlan');
+const Transaction = require('../models/Transaction');
 const { USER_ROLES } = require('../types/enums');
 
 const MAX_LEAD_PAGE_SIZE = 100;
@@ -44,11 +45,79 @@ const mapSubscription = (subscription, plansById) => {
   const planId = subscription.subscriptionPlanId?.toString();
   const plan = planId ? plansById.get(planId) : null;
   return {
+    id: subscription._id?.toString() || null,
     planName: plan?.name || null,
     planType: plan?.planType || null,
+    planPrice: Number(plan?.price || 0),
+    currency: 'EUR',
+    durationInDays: Number(plan?.durationInDays || 0) || null,
+    features: Array.isArray(plan?.features) ? plan.features : [],
     status: subscription.isActive && new Date(subscription.endDate) > new Date() ? 'ACTIVE' : 'EXPIRED',
     startDate: subscription.startDate || null,
     endDate: subscription.endDate || null,
+  };
+};
+
+/**
+ * Revenue is calculated from successful subscription-payment transactions,
+ * never from plan prices or the platform's general earnings total. This keeps
+ * appointment and product/order revenue out of the CRM metric.
+ */
+const getSubscriptionRevenueSummary = async () => {
+  const [summary] = await Transaction.aggregate([
+    {
+      $match: {
+        status: 'SUCCESS',
+        relatedSubscriptionId: { $ne: null },
+      },
+    },
+    {
+      $lookup: {
+        from: User.collection.name,
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'subscriber',
+      },
+    },
+    { $unwind: '$subscriber' },
+    {
+      $match: {
+        'subscriber.role': { $in: [USER_ROLES.VETERINARIAN, USER_ROLES.PET_STORE] },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalRevenue: { $sum: '$amount' },
+        totalPayments: { $sum: 1 },
+        veterinarianRevenue: {
+          $sum: {
+            $cond: [
+              { $eq: ['$subscriber.role', USER_ROLES.VETERINARIAN] },
+              '$amount',
+              0,
+            ],
+          },
+        },
+        pharmacyRevenue: {
+          $sum: {
+            $cond: [
+              { $eq: ['$subscriber.role', USER_ROLES.PET_STORE] },
+              '$amount',
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]).maxTimeMS(5000);
+
+  return {
+    totalRevenue: Number(summary?.totalRevenue || 0),
+    totalPayments: Number(summary?.totalPayments || 0),
+    veterinarianRevenue: Number(summary?.veterinarianRevenue || 0),
+    pharmacyRevenue: Number(summary?.pharmacyRevenue || 0),
+    currency: 'EUR',
   };
 };
 
@@ -154,7 +223,7 @@ const getCrmLeads = async (filters = {}) => {
     .maxTimeMS(10000);
 
   const userIds = users.map((user) => user._id);
-  const [profiles, petStores, veterinarianSubscriptions, petStoreSubscriptions] = userIds.length > 0
+  const [profiles, petStores, veterinarianSubscriptions, petStoreSubscriptions, subscriptionRevenue] = userIds.length > 0
     ? await Promise.all([
       VeterinarianProfile.find({ userId: { $in: userIds } })
         .select('userId specializations experienceYears licenseDocument isVerified profileCompleted clinics')
@@ -166,8 +235,9 @@ const getCrmLeads = async (filters = {}) => {
         .sort({ endDate: -1, createdAt: -1 }).lean().maxTimeMS(5000),
       PetStoreSubscription.find({ petStoreOwnerId: { $in: userIds }, isActive: true })
         .sort({ endDate: -1, createdAt: -1 }).lean().maxTimeMS(5000),
+      getSubscriptionRevenueSummary(),
     ])
-    : [[], [], [], []];
+    : [[], [], [], [], await getSubscriptionRevenueSummary()];
 
   const profilesByUserId = new Map(profiles.map((profile) => [profile.userId.toString(), profile]));
   const storesByOwnerId = new Map(petStores.map((store) => [store.ownerId?.toString(), store]));
@@ -187,7 +257,8 @@ const getCrmLeads = async (filters = {}) => {
     ...petStoreSubscriptions.map((subscription) => subscription.subscriptionPlanId?.toString()),
   ]);
   const plans = subscriptionPlanIds.length > 0
-    ? await SubscriptionPlan.find({ _id: { $in: subscriptionPlanIds } }).select('name planType').lean().maxTimeMS(3000)
+    ? await SubscriptionPlan.find({ _id: { $in: subscriptionPlanIds } })
+      .select('name planType price durationInDays features status').lean().maxTimeMS(3000)
     : [];
   const plansById = new Map(plans.map((plan) => [plan._id.toString(), plan]));
 
@@ -262,6 +333,9 @@ const getCrmLeads = async (filters = {}) => {
       totalPages: Math.max(1, Math.ceil(total / limit)),
     },
     filterOptions,
+    stats: {
+      subscriptionRevenue,
+    },
     generatedAt: new Date().toISOString(),
   };
 };
