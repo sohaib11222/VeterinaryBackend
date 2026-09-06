@@ -110,7 +110,7 @@ const getSubscriptionRevenueSummary = async () => {
         },
       },
     },
-  ]).maxTimeMS(5000);
+  ]).option({ maxTimeMS: 5000 });
 
   return {
     totalRevenue: Number(summary?.totalRevenue || 0),
