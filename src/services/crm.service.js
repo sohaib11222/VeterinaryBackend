@@ -231,9 +231,9 @@ const getCrmLeads = async (filters = {}) => {
       PetStore.find({ ownerId: { $in: userIds } })
         .select('ownerId name phone address isActive profileCompleted isPublic')
         .lean().maxTimeMS(5000),
-      VeterinarianSubscription.find({ veterinarianId: { $in: userIds }, isActive: true })
+      VeterinarianSubscription.find({ veterinarianId: { $in: userIds } })
         .sort({ endDate: -1, createdAt: -1 }).lean().maxTimeMS(5000),
-      PetStoreSubscription.find({ petStoreOwnerId: { $in: userIds }, isActive: true })
+      PetStoreSubscription.find({ petStoreOwnerId: { $in: userIds } })
         .sort({ endDate: -1, createdAt: -1 }).lean().maxTimeMS(5000),
       getSubscriptionRevenueSummary(),
     ])

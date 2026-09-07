@@ -23,6 +23,14 @@ const petStoreSubscriptionSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  expiryEmailSentAt: {
+    type: Date,
+    default: null
+  },
+  expiryEmailProcessingAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true

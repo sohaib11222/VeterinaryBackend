@@ -3,6 +3,7 @@ const connectDB = require("./config/database");
 const config = require("./config/env");
 const { runAppointmentNotifications } = require("./workers/appointmentNotification.worker");
 const { runVaccinationNotifications } = require("./workers/vaccinationNotification.worker");
+const { runSubscriptionExpiryNotifications } = require("./workers/subscriptionExpiry.worker");
 
 const PORT = config.PORT || 5000;
 
@@ -36,6 +37,23 @@ const PORT = config.PORT || 5000;
     }, 60 * 60 * 1000);
 
     console.log("✅ Vaccination notification worker started (runs every hour)");
+
+    const checkSubscriptionExpiry = async () => {
+      try {
+        const result = await runSubscriptionExpiryNotifications();
+        if (result.veterinarianCount || result.pharmacyCount) {
+          console.log("✅ Subscription expiry notifications processed", result);
+        }
+      } catch (error) {
+        console.error("Error in subscription expiry worker:", error);
+      }
+    };
+
+    // Run once at startup and then every minute so expiry emails are sent
+    // without waiting for a user to open a subscription page.
+    await checkSubscriptionExpiry();
+    setInterval(checkSubscriptionExpiry, 60 * 1000);
+    console.log("✅ Subscription expiry worker started (runs every minute)");
   } catch (error) {
     console.error("✗ Server start failed:", error.message);
     process.exit(1);

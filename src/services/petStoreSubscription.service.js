@@ -3,6 +3,7 @@ const SubscriptionPlan = require('../models/SubscriptionPlan');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const petStorePlanPolicy = require('./petStorePlanPolicy.service');
+const { sendSubscriptionPurchaseEmail } = require('./email.service');
 
 const getMySubscription = async (petStoreOwnerId) => {
   const user = await User.findById(petStoreOwnerId);
@@ -74,13 +75,15 @@ const purchaseSubscription = async (petStoreOwnerId, planId) => {
   endDate.setDate(endDate.getDate() + plan.durationInDays);
 
   const subscription = await PetStoreSubscription.findOneAndUpdate(
-    { petStoreOwnerId, isActive: true },
+    { petStoreOwnerId, isActive: true, endDate: { $gt: new Date() } },
     {
       petStoreOwnerId,
       subscriptionPlanId: planId,
       startDate,
       endDate,
       isActive: true,
+      expiryEmailSentAt: null,
+      expiryEmailProcessingAt: null,
     },
     { upsert: true, new: true }
   );
@@ -99,8 +102,18 @@ const purchaseSubscription = async (petStoreOwnerId, planId) => {
     console.error('Failed to create transaction record:', error);
   }
 
+  await sendSubscriptionPurchaseEmail({
+    user,
+    subscription,
+    plan,
+    role: user.role,
+  }).catch((error) => {
+    console.error('[email] Failed to send pharmacy subscription purchase email:', error.message);
+  });
+
   const my = await getMySubscription(petStoreOwnerId);
   await require('./petStore.service').getSetupStatusForOwner(petStoreOwnerId);
+
   return {
     ...my,
     subscriptionId: subscription?._id || null,

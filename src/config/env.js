@@ -45,6 +45,7 @@ module.exports = {
   SMTP_PASS: process.env.SMTP_PASS,
   SMTP_FROM: process.env.SMTP_FROM || process.env.SMTP_USER,
   SMTP_FROM_NAME: process.env.SMTP_FROM_NAME || "MyPetPlus",
+  APP_URL: process.env.APP_URL || process.env.FRONTEND_URL || "https://mypetplus.it",
 
   // payment
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,

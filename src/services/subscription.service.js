@@ -3,6 +3,7 @@ const SubscriptionPlan = require('../models/SubscriptionPlan');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const subscriptionPolicy = require('./subscriptionPolicy.service');
+const { sendSubscriptionPurchaseEmail } = require('./email.service');
 
 /**
  * Get current subscription for authenticated veterinarian
@@ -79,13 +80,15 @@ const purchaseSubscription = async (veterinarianId, planId) => {
   endDate.setDate(endDate.getDate() + plan.durationInDays);
 
   const subscription = await VeterinarianSubscription.findOneAndUpdate(
-    { veterinarianId, isActive: true },
+    { veterinarianId, isActive: true, endDate: { $gt: new Date() } },
     {
       veterinarianId,
       subscriptionPlanId: planId,
       startDate,
       endDate,
       isActive: true,
+      expiryEmailSentAt: null,
+      expiryEmailProcessingAt: null,
     },
     { upsert: true, new: true }
   );
@@ -104,7 +107,17 @@ const purchaseSubscription = async (veterinarianId, planId) => {
     console.error('Failed to create transaction record:', error);
   }
 
+  await sendSubscriptionPurchaseEmail({
+    user: veterinarian,
+    subscription,
+    plan,
+    role: veterinarian.role,
+  }).catch((error) => {
+    console.error('[email] Failed to send veterinarian subscription purchase email:', error.message);
+  });
+
   const my = await getMySubscription(veterinarianId);
+
   return {
     ...my,
     subscriptionId: subscription?._id || null,

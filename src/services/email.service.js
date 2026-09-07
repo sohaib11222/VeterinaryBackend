@@ -131,11 +131,98 @@ const sendEmail = async ({ to, subject, text, html }) => {
 const sendWelcomeEmail = async ({ name, email }) => {
   const displayName = name || 'there';
   const safeName = escapeHtml(displayName);
+  const accountUrl = escapeHtml(`${env.APP_URL}/login`);
   return sendEmail({
     to: email,
     subject: 'Welcome to MyPetPlus',
-    text: `Hi ${displayName},\n\nThank you for joining MyPetPlus. Welcome to the platform! We are happy to have you with us.\n\nThe MyPetPlus Team`,
-    html: `<p>Hi ${safeName},</p><p>Thank you for joining <strong>MyPetPlus</strong>. Welcome to the platform! We are happy to have you with us.</p><p>The MyPetPlus Team</p>`,
+    text: `Hi ${displayName},\n\nWelcome to MyPetPlus — we are happy to have you with us. Your pet-care account has been created successfully.\n\nWith MyPetPlus, you can manage your pets' profiles and health information, book appointments with veterinarians, review medical records, communicate with your care team, and order from participating pharmacies.\n\nSign in to explore your account: ${env.APP_URL}/login\n\nThe MyPetPlus Team`,
+    html: emailLayout({
+      title: 'Welcome to MyPetPlus',
+      preview: 'Your MyPetPlus pet-care account is ready.',
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${safeName},</p>
+        <p style="font-size:16px;line-height:1.7;">Welcome to <strong>MyPetPlus</strong> — we are delighted to have you and your pets with us.</p>
+        <div style="margin:22px 0;padding:18px 20px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:10px;font-size:15px;line-height:1.65;color:#1f2937;">Your pet-care account has been created successfully. MyPetPlus brings your pet's everyday care, appointments, records, and pharmacy needs together in one place.</div>
+        <h2 style="font-size:17px;margin:24px 0 10px;color:#172033;">What you can do next</h2>
+        <ul style="margin:0;padding-left:22px;color:#4b5563;font-size:15px;line-height:1.8;">
+          <li>Add and manage your pets' profiles.</li>
+          <li>Book appointments with veterinarians and follow appointment updates.</li>
+          <li>Keep medical records, reports, and health information organised.</li>
+          <li>Chat with your care team and order products from participating pharmacies.</li>
+        </ul>
+        <p style="margin:26px 0 0;text-align:center;"><a href="${accountUrl}" style="display:inline-block;padding:13px 24px;border-radius:8px;background:#149b99;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Go to My Account</a></p>
+        <p style="font-size:14px;line-height:1.65;color:#6b7280;margin:24px 0 0;">Thank you for choosing MyPetPlus to support the health and wellbeing of your pets.</p>`,
+    }),
+  });
+};
+
+const subscriptionRoleLabel = (role) => String(role || '').toUpperCase() === 'PET_STORE' ? 'Pharmacy' : 'Doctor';
+
+const subscriptionPanelUrl = (role) => String(role || '').toUpperCase() === 'PET_STORE'
+  ? `${env.APP_URL}/pharmacy-admin/subscription`
+  : `${env.APP_URL}/doctor/subscription-plans`;
+
+const sendSubscriptionPurchaseEmail = async ({ user, subscription, plan, role }) => {
+  const displayName = user?.name || 'there';
+  const roleLabel = subscriptionRoleLabel(role || user?.role);
+  const planName = plan?.name || 'Subscription plan';
+  const startDate = formatDate(subscription?.startDate);
+  const endDate = formatDate(subscription?.endDate);
+  const amount = formatAmount(plan?.price);
+  const duration = plan?.durationInDays ? `${plan.durationInDays} days` : 'Not specified';
+  const panelUrl = escapeHtml(subscriptionPanelUrl(role || user?.role));
+
+  return sendEmail({
+    to: user?.email,
+    subject: `Your MyPetPlus ${planName} subscription is active`,
+    text: `Hi ${displayName},\n\nYour ${roleLabel} subscription has been purchased successfully and is now active.\n\nPlan: ${planName}\nAmount: ${amount}\nStart date: ${startDate}\nExpiry date: ${endDate}\nDuration: ${duration}\n\nYou can sign in to your MyPetPlus panel to use and manage your subscription: ${subscriptionPanelUrl(role || user?.role)}\n\nThe MyPetPlus Team`,
+    html: emailLayout({
+      title: 'Your subscription is active',
+      preview: `${planName} subscription purchased successfully.`,
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(displayName)},</p>
+        <p style="font-size:15px;line-height:1.65;">Your <strong>${escapeHtml(roleLabel)}</strong> subscription has been purchased successfully and is now active.</p>
+        ${detailsTable([
+          ['Plan', planName],
+          ['Amount', amount],
+          ['Start date', startDate],
+          ['Expiry date', endDate],
+          ['Duration', duration],
+          ['Status', 'Active'],
+        ])}
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;">You can now use the services and features included in your plan.</p>
+        <p style="margin:24px 0 0;text-align:center;"><a href="${panelUrl}" style="display:inline-block;padding:13px 24px;border-radius:8px;background:#149b99;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Open MyPetPlus Panel</a></p>`,
+    }),
+  });
+};
+
+const sendSubscriptionExpiryEmail = async ({ user, subscription, plan, role }) => {
+  const displayName = user?.name || 'there';
+  const roleLabel = subscriptionRoleLabel(role || user?.role);
+  const planName = plan?.name || 'Subscription plan';
+  const startDate = formatDate(subscription?.startDate);
+  const endDate = formatDate(subscription?.endDate);
+  const amount = formatAmount(plan?.price);
+  const panelUrl = escapeHtml(subscriptionPanelUrl(role || user?.role));
+
+  return sendEmail({
+    to: user?.email,
+    subject: `Your MyPetPlus subscription has expired`,
+    text: `Hi ${displayName},\n\nYour ${roleLabel} subscription has expired. Please renew your subscription to continue using the available services and features.\n\nPlan: ${planName}\nStart date: ${startDate}\nExpiry date: ${endDate}\nAmount: ${amount}\n\nRenew your subscription in your MyPetPlus panel: ${subscriptionPanelUrl(role || user?.role)}\n\nThe MyPetPlus Team`,
+    html: emailLayout({
+      title: 'Your subscription has expired',
+      preview: 'Renew your MyPetPlus subscription to continue using the platform.',
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(displayName)},</p>
+        <p style="font-size:16px;line-height:1.7;">Your <strong>${escapeHtml(roleLabel)}</strong> subscription has expired.</p>
+        <div style="margin:22px 0;padding:18px 20px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;font-size:15px;line-height:1.65;color:#9a3412;">Please renew your subscription to continue using the available services and features on MyPetPlus.</div>
+        ${detailsTable([
+          ['Plan', planName],
+          ['Start date', startDate],
+          ['Expired on', endDate],
+          ['Plan price', amount],
+          ['Status', 'Expired'],
+        ])}
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;">Renewing restores access according to the plan you select.</p>
+        <p style="margin:24px 0 0;text-align:center;"><a href="${panelUrl}" style="display:inline-block;padding:13px 24px;border-radius:8px;background:#149b99;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Renew Subscription</a></p>`,
+    }),
   });
 };
 
@@ -373,6 +460,8 @@ module.exports = {
   sendApprovalEmail,
   sendPasswordVerificationCodeEmail,
   sendEmailVerificationCodeEmail,
+  sendSubscriptionPurchaseEmail,
+  sendSubscriptionExpiryEmail,
   sendAppointmentBookedEmail,
   sendAppointmentStatusEmail,
   sendNewOrderEmail,

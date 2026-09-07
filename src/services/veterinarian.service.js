@@ -13,6 +13,7 @@ const Notification = require('../models/Notification');
 const mongoose = require('mongoose');
 const { VETERINARY_SPECIALIZATION } = require('../types/enums');
 const { validateObjectId } = require('../utils/validation');
+const { sendSubscriptionPurchaseEmail } = require('./email.service');
 
 const hasText = (value) => typeof value === 'string' && value.trim().length > 0;
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -824,7 +825,8 @@ const buySubscriptionPlan = async (veterinarianId, planId) => {
   // Create or update subscription
   let subscription = await VeterinarianSubscription.findOne({
     veterinarianId,
-    isActive: true
+    isActive: true,
+    endDate: { $gt: new Date() }
   });
 
   if (subscription) {
@@ -832,6 +834,8 @@ const buySubscriptionPlan = async (veterinarianId, planId) => {
     subscription.startDate = startDate;
     subscription.endDate = endDate;
     subscription.isActive = true;
+    subscription.expiryEmailSentAt = null;
+    subscription.expiryEmailProcessingAt = null;
     await subscription.save();
   } else {
     subscription = await VeterinarianSubscription.create({
@@ -859,6 +863,14 @@ const buySubscriptionPlan = async (veterinarianId, planId) => {
   }
 
   await subscription.populate('subscriptionPlanId', 'name price durationInDays features status');
+  await sendSubscriptionPurchaseEmail({
+    user: veterinarian,
+    subscription,
+    plan,
+    role: veterinarian.role,
+  }).catch((error) => {
+    console.error('[email] Failed to send veterinarian subscription purchase email:', error.message);
+  });
 
   return {
     subscription,

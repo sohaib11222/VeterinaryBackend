@@ -5,6 +5,7 @@ const SubscriptionPlan = require('../models/SubscriptionPlan');
 const Product = require('../models/Product');
 const VeterinarianSubscription = require('../models/VeterinarianSubscription');
 const balanceService = require('./balance.service');
+const { sendSubscriptionPurchaseEmail } = require('./email.service');
 
 /**
  * Process appointment payment
@@ -124,16 +125,27 @@ const processSubscriptionPayment = async (veterinarianId, planId, amount, paymen
 
   // Create or update subscription
   const subscription = await VeterinarianSubscription.findOneAndUpdate(
-    { veterinarianId, isActive: true },
+    { veterinarianId, isActive: true, endDate: { $gt: new Date() } },
     {
       veterinarianId,
       subscriptionPlanId: planId,
       startDate,
       endDate,
-      isActive: true
+      isActive: true,
+      expiryEmailSentAt: null,
+      expiryEmailProcessingAt: null
     },
     { upsert: true, new: true }
   );
+
+  await sendSubscriptionPurchaseEmail({
+    user: veterinarian,
+    subscription,
+    plan,
+    role: veterinarian.role,
+  }).catch((error) => {
+    console.error('[email] Failed to send veterinarian subscription purchase email:', error.message);
+  });
 
   return { transaction, subscription };
 };
