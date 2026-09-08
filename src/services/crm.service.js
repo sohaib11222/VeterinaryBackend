@@ -226,7 +226,7 @@ const getCrmLeads = async (filters = {}) => {
   const [profiles, petStores, veterinarianSubscriptions, petStoreSubscriptions, subscriptionRevenue] = userIds.length > 0
     ? await Promise.all([
       VeterinarianProfile.find({ userId: { $in: userIds } })
-        .select('userId specializations experienceYears licenseDocument isVerified profileCompleted clinics')
+        .select('userId title biography specializations experienceYears licenseDocument isVerified profileCompleted isAvailableOnline ratingAvg ratingCount clinics')
         .lean().maxTimeMS(5000),
       PetStore.find({ ownerId: { $in: userIds } })
         .select('ownerId name phone address isActive profileCompleted isPublic')
@@ -266,6 +266,9 @@ const getCrmLeads = async (filters = {}) => {
     const userId = user._id.toString();
     const veterinarian = profilesByUserId.get(userId) || null;
     const petStore = storesByOwnerId.get(userId) || null;
+    const clinic = Array.isArray(veterinarian?.clinics)
+      ? veterinarian.clinics.find((entry) => entry?.city || entry?.state || entry?.country || entry?.address) || null
+      : null;
     const documents = (Array.isArray(user.documentUploads) ? user.documentUploads : [])
       .map((document) => text(document?.type).toUpperCase())
       .filter(Boolean);
@@ -273,7 +276,16 @@ const getCrmLeads = async (filters = {}) => {
       documents.push('LICENSE_DOCUMENT');
     }
 
-    const address = petStore?.address || user.address || {};
+    // A veterinarian's public operating location belongs to their clinic. Fall
+    // back to the account address only when no clinic details were entered.
+    const address = clinic
+      ? {
+        line1: clinic.address || null,
+        city: clinic.city || null,
+        state: clinic.state || null,
+        country: clinic.country || null,
+      }
+      : petStore?.address || user.address || {};
     const subscription = user.role === USER_ROLES.VETERINARIAN
       ? mapSubscription(veterinarianSubscriptionsByUserId.get(userId), plansById)
       : mapSubscription(petStoreSubscriptionsByUserId.get(userId), plansById);
@@ -294,9 +306,22 @@ const getCrmLeads = async (filters = {}) => {
       area: address?.line2 || address?.line1 || null,
       specializations: veterinarian?.specializations || [],
       veterinarian: veterinarian ? {
+        title: veterinarian.title || null,
+        biography: veterinarian.biography || null,
         experienceYears: veterinarian.experienceYears || null,
         isVerified: Boolean(veterinarian.isVerified),
         profileCompleted: Boolean(veterinarian.profileCompleted),
+        isAvailableOnline: Boolean(veterinarian.isAvailableOnline),
+        ratingAvg: Number(veterinarian.ratingAvg || 0),
+        ratingCount: Number(veterinarian.ratingCount || 0),
+        clinic: clinic ? {
+          name: clinic.name || null,
+          address: clinic.address || null,
+          city: clinic.city || null,
+          region: clinic.state || null,
+          country: clinic.country || null,
+          phone: clinic.phone || null,
+        } : null,
       } : null,
       business: petStore ? {
         name: petStore.name || null,
