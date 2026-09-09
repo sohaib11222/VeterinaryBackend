@@ -30,6 +30,25 @@ const assertAppointmentChatHasStarted = (appointment) => {
 
 const sameId = (left, right) => String(left || '') === String(right || '');
 
+const normalizeChatAttachments = (items) => (Array.isArray(items) ? items : [])
+  .map((attachment) => {
+    if (!attachment || typeof attachment !== 'object') return null;
+    const url = String(attachment.url || attachment.fileUrl || '').trim();
+    if (!url) return null;
+    const mimeType = String(attachment.mimeType || attachment.mimetype || '').trim() || null;
+    const rawType = String(attachment.type || '').trim().toLowerCase();
+    const type = rawType === 'image' || mimeType?.startsWith('image/') ? 'image' : 'file';
+    const size = Number(attachment.size);
+    return {
+      type,
+      url,
+      name: attachment.name || attachment.fileName || null,
+      size: Number.isFinite(size) && size >= 0 ? size : null,
+      mimeType,
+    };
+  })
+  .filter(Boolean);
+
 const assertConversationParticipant = (conversation, userId) => {
   const participantIds = [conversation.veterinarianId, conversation.petOwnerId, conversation.petSitterId, conversation.adminId, conversation.businessId]
     .filter(Boolean)
@@ -202,10 +221,13 @@ const sendMessage = async (data) => {
   } = data;
 
   const messageText = typeof message === 'string' ? message.trim() : null;
-  const normalizedAttachments = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+  const normalizedAttachments = normalizeChatAttachments(attachments);
   const primaryAttachment = normalizedAttachments.length > 0 ? normalizedAttachments[0] : null;
   const resolvedFileUrl = fileUrl || primaryAttachment?.url || null;
   const resolvedFileName = fileName || primaryAttachment?.name || null;
+  const normalizedType = ['TEXT', 'IMAGE', 'FILE', 'SYSTEM'].includes(String(type || '').toUpperCase())
+    ? String(type).toUpperCase()
+    : (normalizedAttachments.length ? 'FILE' : 'TEXT');
 
   if (!messageText && normalizedAttachments.length === 0 && !resolvedFileUrl) {
     throw new Error('Message text or at least one attachment is required');
@@ -241,7 +263,7 @@ const sendMessage = async (data) => {
     conversation.lastMessageAt = sentAt;
     conversation.lastMessage = { message: messageText || (resolvedFileName ? `File: ${resolvedFileName}` : ''), sentAt, sentBy: senderId, readBy: [senderId] };
     conversation.unreadCount = sameId(senderId, petSitterId) ? 1 : 0;
-    const chatMessage = await ChatMessage.create({ conversationId: conversation._id, senderId, message: messageText || null, type, attachments: normalizedAttachments, fileUrl: resolvedFileUrl, fileName: resolvedFileName });
+    const chatMessage = await ChatMessage.create({ conversationId: conversation._id, senderId, message: messageText || null, type: normalizedType, attachments: normalizedAttachments, fileUrl: resolvedFileUrl, fileName: resolvedFileName });
     await conversation.save();
     await Notification.create({ userId: sameId(senderId, petSitterId) ? petOwnerId : petSitterId, title: sameId(senderId, petSitterId) ? 'New Message from Pet Sitter' : 'New Message from Pet Owner', body: messageText ? (messageText.length > 100 ? `${messageText.substring(0, 100)}...` : messageText) : (resolvedFileName ? `File: ${resolvedFileName}` : 'You have a new message'), type: 'CHAT', data: { conversationId: conversation._id.toString(), messageId: chatMessage._id.toString() } });
     return chatMessage;
@@ -287,7 +309,7 @@ const sendMessage = async (data) => {
       conversationId: conversation._id,
       senderId,
       message: messageText || null,
-      type,
+      type: normalizedType,
       attachments: normalizedAttachments,
       fileUrl: resolvedFileUrl,
       fileName: resolvedFileName
@@ -407,7 +429,7 @@ const sendMessage = async (data) => {
       conversationId: conversation._id,
       senderId,
       message: messageText || null,
-      type,
+      type: normalizedType,
       attachments: normalizedAttachments,
       fileUrl: resolvedFileUrl,
       fileName: resolvedFileName
@@ -795,7 +817,7 @@ const markMessagesAsRead = async (conversationId, userId) => {
 
   // Update conversation unread count
   conversation.unreadCount = 0;
-  if (conversation.lastMessage && !conversation.lastMessage.readBy.includes(userId)) {
+  if (conversation.lastMessage && !conversation.lastMessage.readBy.some((id) => sameId(id, userId))) {
     conversation.lastMessage.readBy.push(userId);
   }
   await conversation.save();
