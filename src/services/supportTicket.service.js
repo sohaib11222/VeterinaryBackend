@@ -57,13 +57,16 @@ const notifyAdmins = async ({ title, body, data }) => {
 };
 
 const assertPatient = (role) => {
-  if (String(role || '').toUpperCase() !== 'PET_OWNER') {
-    throw httpError('Only pet owners can access patient support tickets', 403);
+  if (!['PET_OWNER', 'PET_SITTER'].includes(String(role || '').toUpperCase())) {
+    throw httpError('Only pet owners and pet sitters can access user support tickets', 403);
   }
 };
 
-const getOwnedRelatedRecord = async (patientId, type, recordId) => {
+const senderRoleFor = (role) => String(role || '').toUpperCase() === 'PET_SITTER' ? 'PET_SITTER' : 'PET_OWNER';
+
+const getOwnedRelatedRecord = async (patientId, type, recordId, role = 'PET_OWNER') => {
   if (!type && !recordId) return null;
+  if (String(role).toUpperCase() === 'PET_SITTER') return { type: 'OTHER', recordId: null };
   if (!type || !recordId) throw httpError('Select both a related record type and record');
   if (!SUPPORT_RELATED_RECORD_TYPES.includes(type)) throw httpError('Unsupported related record type');
   if (!isValidObjectId(recordId)) throw httpError('Invalid related record');
@@ -189,7 +192,7 @@ const createPatientTicket = async (patientId, role, payload = {}) => {
   if (subject.length < 4 || subject.length > 180) throw httpError('Subject must be between 4 and 180 characters');
   if (description.length < 10 || description.length > 8000) throw httpError('Description must be between 10 and 8000 characters');
   if (!SUPPORT_TICKET_CATEGORIES.includes(category)) throw httpError('Select a valid support category');
-  const relatedRecord = await getOwnedRelatedRecord(patientId, normalizeEnum(payload.relatedRecord?.type), payload.relatedRecord?.recordId);
+  const relatedRecord = await getOwnedRelatedRecord(patientId, normalizeEnum(payload.relatedRecord?.type), payload.relatedRecord?.recordId, role);
   const ticket = await SupportTicket.create({
     ticketNumber: await SupportTicket.createTicketNumber(),
     patientId,
@@ -206,7 +209,7 @@ const createPatientTicket = async (patientId, role, payload = {}) => {
   await SupportTicketMessage.create({
     ticketId: ticket._id,
     senderId: patientId,
-    senderRole: 'PET_OWNER',
+    senderRole: senderRoleFor(role),
     body: description,
     attachments,
   });
@@ -243,8 +246,8 @@ const addPatientMessage = async (ticketId, patientId, role, payload = {}) => {
   ticket.unreadForPatient = false;
   ticket.lastMessageAt = new Date();
   await ticket.save();
-  const message = await SupportTicketMessage.create({ ticketId: ticket._id, senderId: patientId, senderRole: 'PET_OWNER', body: body || null, attachments });
-  await createActivity(ticket._id, patientId, 'PATIENT_REPLIED', 'Patient sent a reply');
+  const message = await SupportTicketMessage.create({ ticketId: ticket._id, senderId: patientId, senderRole: senderRoleFor(role), body: body || null, attachments });
+  await createActivity(ticket._id, patientId, 'PATIENT_REPLIED', `${senderRoleFor(role) === 'PET_SITTER' ? 'Pet sitter' : 'Pet owner'} sent a reply`);
   if (previousStatus !== ticket.status) await createActivity(ticket._id, patientId, 'STATUS_CHANGED', 'Status changed to In Progress', { from: previousStatus, to: ticket.status });
   if (attachments.length) await createActivity(ticket._id, patientId, 'ATTACHMENTS_ADDED', `${attachments.length} attachment${attachments.length === 1 ? '' : 's'} added`);
   await notifyAdmins({
@@ -291,22 +294,27 @@ const listAdminTickets = async (options = {}) => {
   const status = normalizeEnum(options.status);
   const category = normalizeEnum(options.category);
   const priority = normalizeEnum(options.priority);
+  const userRole = normalizeEnum(options.userRole);
   const patientId = String(options.patientId || '').trim();
   const search = normalizeText(options.search);
   if (SUPPORT_TICKET_STATUSES.includes(status)) query.status = status;
   if (SUPPORT_TICKET_CATEGORIES.includes(category)) query.category = category;
   if (SUPPORT_TICKET_PRIORITIES.includes(priority)) query.priority = priority;
   if (isValidObjectId(patientId)) query.patientId = patientId;
+  if (['PET_OWNER', 'VETERINARIAN', 'PET_STORE', 'PARAPHARMACY', 'PET_SITTER'].includes(userRole)) {
+    const creators = await User.find({ role: userRole }).select('_id').lean();
+    query.patientId = { $in: creators.map((creator) => creator._id) };
+  }
   if (search) query.$or = [{ ticketNumber: { $regex: search, $options: 'i' } }, { subject: { $regex: search, $options: 'i' } }];
   const [tickets, total] = await Promise.all([
     SupportTicket.find(query)
-      .populate('patientId', 'name fullName email profileImage')
+      .populate('patientId', 'name fullName email profileImage role')
       .populate('assignedAdminId', 'name fullName email')
       .sort({ unreadForAdmin: -1, lastMessageAt: -1, updatedAt: -1 })
       .skip((page - 1) * limit).limit(limit).lean(),
     SupportTicket.countDocuments(query),
   ]);
-  return { tickets: tickets.map(formatTicketList), pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
+  return { tickets: tickets.map((ticket) => ({ ...formatTicketList(ticket), creatorRole: ticket.patientId?.role || null })), pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
 };
 
 const getAdminTicket = async (ticketId) => {

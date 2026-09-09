@@ -33,7 +33,7 @@ router.get(
  */
 router.post(
   '/profile',
-  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_STORE', 'PARAPHARMACY']),
+  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_STORE', 'PARAPHARMACY', 'PET_SITTER']),
   uploadSingleImage('profile'),
   asyncHandler(uploadController.uploadSingleFile)
 );
@@ -161,7 +161,7 @@ router.post(
  */
 router.post(
   '/chat',
-  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER']),
+  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_SITTER']),
   uploadSingleChatFile('chat'),
   asyncHandler(uploadController.uploadSingleFile)
 );
@@ -173,7 +173,7 @@ router.post(
  */
 router.post(
   '/chat/multiple',
-  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER']),
+  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_SITTER']),
   uploadMultipleChatFiles('chat', 10),
   asyncHandler(uploadController.uploadMultipleFiles)
 );

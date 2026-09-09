@@ -15,6 +15,7 @@ router.use('/auth', require('./auth.routes'));
 router.use('/pets', require('./pet.routes'));
 router.use('/pet-owners', require('./petOwner.routes'));
 router.use('/veterinarians', require('./veterinarian.routes'));
+router.use('/pet-sitters', require('./petSitter.routes'));
 router.use('/appointments', require('./appointment.routes'));
 router.use('/prescriptions', require('./prescription.routes'));
 router.use('/medical-records', require('./medicalRecord.routes'));

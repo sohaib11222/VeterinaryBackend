@@ -105,6 +105,11 @@ const userSchema = new mongoose.Schema({
     ref: 'VeterinarianProfile',
     default: null
   },
+  petSitterProfile: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PetSitterProfile',
+    default: null
+  },
   subscriptionPlan: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'SubscriptionPlan',

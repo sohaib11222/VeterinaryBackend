@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const supportTicketMessageSchema = new mongoose.Schema({
   ticketId: { type: mongoose.Schema.Types.ObjectId, ref: 'SupportTicket', required: true, index: true },
   senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  senderRole: { type: String, enum: ['PET_OWNER', 'ADMIN'], required: true },
+  senderRole: { type: String, enum: ['PET_OWNER', 'PET_SITTER', 'ADMIN'], required: true },
   body: { type: String, default: null, trim: true, maxlength: 8000 },
   attachments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'SupportTicketAttachment' }],
 }, { timestamps: true });

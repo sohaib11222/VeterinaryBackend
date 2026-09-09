@@ -11,6 +11,11 @@ const conversationSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  petSitterId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
   adminId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -34,6 +39,7 @@ const conversationSchema = new mongoose.Schema({
     type: String,
     enum: [
       'VETERINARIAN_PET_OWNER',
+      'PET_SITTER_PET_OWNER',
       'ADMIN_VETERINARIAN',
       'ADMIN_PET_STORE',
       'ADMIN_PARAPHARMACY'
@@ -82,6 +88,7 @@ const conversationSchema = new mongoose.Schema({
 // Indexes
 conversationSchema.index({ veterinarianId: 1, petOwnerId: 1 });
 conversationSchema.index({ veterinarianId: 1, petOwnerId: 1, conversationType: 1, mergedInto: 1, lastMessageAt: -1 });
+conversationSchema.index({ petSitterId: 1, petOwnerId: 1, conversationType: 1, mergedInto: 1, lastMessageAt: -1 });
 conversationSchema.index({ adminId: 1, businessId: 1, conversationType: 1 });
 conversationSchema.index({ appointmentId: 1 });
 conversationSchema.index({ lastMessageAt: -1 });

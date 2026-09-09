@@ -31,7 +31,7 @@ const assertAppointmentChatHasStarted = (appointment) => {
 const sameId = (left, right) => String(left || '') === String(right || '');
 
 const assertConversationParticipant = (conversation, userId) => {
-  const participantIds = [conversation.veterinarianId, conversation.petOwnerId, conversation.adminId, conversation.businessId]
+  const participantIds = [conversation.veterinarianId, conversation.petOwnerId, conversation.petSitterId, conversation.adminId, conversation.businessId]
     .filter(Boolean)
     .map((id) => String(id));
 
@@ -190,6 +190,7 @@ const sendMessage = async (data) => {
     petOwnerId,
     adminId,
     businessId,
+    petSitterId,
     senderId,
     message,
     type = 'TEXT',
@@ -210,10 +211,11 @@ const sendMessage = async (data) => {
     throw new Error('Message text or at least one attachment is required');
   }
 
-  const isVeterinarianPetOwnerChat = !!petOwnerId && !!appointmentId;
-  const isAdminSupportChat = !isVeterinarianPetOwnerChat;
+  const isVeterinarianPetOwnerChat = !!petOwnerId && !!appointmentId && !!veterinarianId;
+  const isPetSitterChat = !!petOwnerId && !!petSitterId && !appointmentId;
+  const isAdminSupportChat = !isVeterinarianPetOwnerChat && !isPetSitterChat;
 
-  if (!isAdminSupportChat && !isVeterinarianPetOwnerChat) {
+  if (!isAdminSupportChat && !isVeterinarianPetOwnerChat && !isPetSitterChat) {
     throw new Error('Either an Admin support or veterinarian-pet owner conversation must be specified');
   }
 
@@ -222,7 +224,28 @@ const sendMessage = async (data) => {
     throw new Error('Sender not found');
   }
 
-  if (isAdminSupportChat) {
+  if (isPetSitterChat) {
+    const [petSitter, petOwner] = await Promise.all([User.findById(petSitterId), User.findById(petOwnerId)]);
+    if (!petSitter || petSitter.role !== 'PET_SITTER') throw new Error('Pet sitter not found');
+    if (!petOwner || petOwner.role !== 'PET_OWNER') throw new Error('Pet owner not found');
+    if (!sameId(senderId, petSitterId) && !sameId(senderId, petOwnerId)) throw new Error('Sender must be either pet sitter or pet owner');
+    let conversation = conversationId
+      ? await Conversation.findById(conversationId)
+      : await Conversation.findOne({ petSitterId, petOwnerId, conversationType: 'PET_SITTER_PET_OWNER', mergedInto: null });
+    conversation = await resolveMergedConversation(conversation);
+    if (conversation && (!sameId(conversation.petSitterId, petSitterId) || !sameId(conversation.petOwnerId, petOwnerId))) {
+      throw new Error('Conversation does not belong to this pet sitter and pet owner');
+    }
+    if (!conversation) conversation = await Conversation.create({ petSitterId, petOwnerId, conversationType: 'PET_SITTER_PET_OWNER', lastMessageAt: new Date() });
+    const sentAt = new Date();
+    conversation.lastMessageAt = sentAt;
+    conversation.lastMessage = { message: messageText || (resolvedFileName ? `File: ${resolvedFileName}` : ''), sentAt, sentBy: senderId, readBy: [senderId] };
+    conversation.unreadCount = sameId(senderId, petSitterId) ? 1 : 0;
+    const chatMessage = await ChatMessage.create({ conversationId: conversation._id, senderId, message: messageText || null, type, attachments: normalizedAttachments, fileUrl: resolvedFileUrl, fileName: resolvedFileName });
+    await conversation.save();
+    await Notification.create({ userId: sameId(senderId, petSitterId) ? petOwnerId : petSitterId, title: sameId(senderId, petSitterId) ? 'New Message from Pet Sitter' : 'New Message from Pet Owner', body: messageText ? (messageText.length > 100 ? `${messageText.substring(0, 100)}...` : messageText) : (resolvedFileName ? `File: ${resolvedFileName}` : 'You have a new message'), type: 'CHAT', data: { conversationId: conversation._id.toString(), messageId: chatMessage._id.toString() } });
+    return chatMessage;
+  } else if (isAdminSupportChat) {
     const {
       resolvedAdminId,
       participant,
@@ -462,16 +485,30 @@ const getOrCreateConversation = async (
   adminId,
   appointmentId,
   actorId = null,
-  businessId = null
+  businessId = null,
+  petSitterId = null
 ) => {
-  const isVeterinarianPetOwnerChat = !!petOwnerId && !!appointmentId;
-  const isAdminSupportChat = !isVeterinarianPetOwnerChat;
+  const isVeterinarianPetOwnerChat = !!petOwnerId && !!appointmentId && !!veterinarianId;
+  const isPetSitterChat = !!petOwnerId && !!petSitterId && !appointmentId;
+  const isAdminSupportChat = !isVeterinarianPetOwnerChat && !isPetSitterChat;
 
-  if (!isAdminSupportChat && !isVeterinarianPetOwnerChat) {
+  if (!isAdminSupportChat && !isVeterinarianPetOwnerChat && !isPetSitterChat) {
     throw new Error('Either an Admin support or veterinarian-pet owner conversation must be specified');
   }
 
-  if (isAdminSupportChat) {
+  if (isPetSitterChat) {
+    const [petSitter, petOwner] = await Promise.all([User.findById(petSitterId), User.findById(petOwnerId)]);
+    if (!petSitter || petSitter.role !== 'PET_SITTER') throw new Error('Pet sitter not found');
+    if (!petOwner || petOwner.role !== 'PET_OWNER') throw new Error('Pet owner not found');
+    if (actorId && !sameId(actorId, petSitterId) && !sameId(actorId, petOwnerId)) throw new Error('You do not have access to this conversation');
+    let conversation = await Conversation.findOne({ petSitterId, petOwnerId, conversationType: 'PET_SITTER_PET_OWNER', mergedInto: null }).maxTimeMS(2000);
+    if (!conversation) conversation = await Conversation.create({ petSitterId, petOwnerId, conversationType: 'PET_SITTER_PET_OWNER', lastMessageAt: new Date() });
+    await conversation.populate([
+      { path: 'petSitterId', select: 'name fullName email phone profileImage role' },
+      { path: 'petOwnerId', select: 'name fullName email phone profileImage role' },
+    ]);
+    return conversation;
+  } else if (isAdminSupportChat) {
     const {
       resolvedAdminId,
       participantId,
@@ -601,7 +638,9 @@ const getConversations = async (userId, userRole, options = {}) => {
       ]
     };
   } else if (userRole === 'PET_OWNER') {
-    query = { petOwnerId: userId, conversationType: 'VETERINARIAN_PET_OWNER' };
+    query = { petOwnerId: userId, conversationType: { $in: ['VETERINARIAN_PET_OWNER', 'PET_SITTER_PET_OWNER'] } };
+  } else if (userRole === 'PET_SITTER') {
+    query = { petSitterId: userId, conversationType: 'PET_SITTER_PET_OWNER' };
   } else if (getAdminSupportTypeForRole(userRole)) {
     query = {
       businessId: userId,
@@ -609,6 +648,12 @@ const getConversations = async (userId, userRole, options = {}) => {
     };
   } else {
     throw new Error('Invalid role');
+  }
+
+  if (options.conversationType === 'PET_SITTER' && ['PET_OWNER', 'PET_SITTER'].includes(userRole)) {
+    query = userRole === 'PET_OWNER'
+      ? { petOwnerId: userId, conversationType: 'PET_SITTER_PET_OWNER' }
+      : { petSitterId: userId, conversationType: 'PET_SITTER_PET_OWNER' };
   }
 
   query = { ...query, mergedInto: null };
@@ -627,10 +672,11 @@ const getConversations = async (userId, userRole, options = {}) => {
   const adminIds = [...new Set(conversationsRaw.map(c => c.adminId?.toString()).filter(Boolean))];
   const vetIds = [...new Set(conversationsRaw.map(c => c.veterinarianId?.toString()).filter(Boolean))];
   const businessIds = [...new Set(conversationsRaw.map(c => c.businessId?.toString()).filter(Boolean))];
+  const petSitterIds = [...new Set(conversationsRaw.map(c => c.petSitterId?.toString()).filter(Boolean))];
   const ownerIds = [...new Set(conversationsRaw.map(c => c.petOwnerId?.toString()).filter(Boolean))];
   const appointmentIds = [...new Set(conversationsRaw.map(c => c.appointmentId?.toString()).filter(Boolean))];
 
-  const [admins, veterinarians, businesses, petOwners, appointments] = await Promise.all([
+  const [admins, veterinarians, businesses, petSitters, petOwners, appointments] = await Promise.all([
     adminIds.length > 0 ? User.find({ _id: { $in: adminIds } })
       .select('name email phone profileImage')
       .lean()
@@ -640,6 +686,10 @@ const getConversations = async (userId, userRole, options = {}) => {
       .lean()
       .maxTimeMS(2000) : Promise.resolve([]),
     businessIds.length > 0 ? User.find({ _id: { $in: businessIds } })
+      .select('name fullName email phone profileImage role')
+      .lean()
+      .maxTimeMS(2000) : Promise.resolve([]),
+    petSitterIds.length > 0 ? User.find({ _id: { $in: petSitterIds } })
       .select('name fullName email phone profileImage role')
       .lean()
       .maxTimeMS(2000) : Promise.resolve([]),
@@ -659,6 +709,8 @@ const getConversations = async (userId, userRole, options = {}) => {
   veterinarians.forEach(v => { vetMap[v._id.toString()] = v; });
   const businessMap = {};
   businesses.forEach(b => { businessMap[b._id.toString()] = b; });
+  const petSitterMap = {};
+  petSitters.forEach(s => { petSitterMap[s._id.toString()] = s; });
   const ownerMap = {};
   petOwners.forEach(o => { ownerMap[o._id.toString()] = o; });
   const appointmentMap = {};
@@ -669,6 +721,7 @@ const getConversations = async (userId, userRole, options = {}) => {
     adminId: c.adminId ? adminMap[c.adminId.toString()] : null,
     veterinarianId: c.veterinarianId ? vetMap[c.veterinarianId.toString()] : null,
     businessId: c.businessId ? businessMap[c.businessId.toString()] : null,
+    petSitterId: c.petSitterId ? petSitterMap[c.petSitterId.toString()] : null,
     petOwnerId: c.petOwnerId ? ownerMap[c.petOwnerId.toString()] : null,
     appointmentId: c.appointmentId ? appointmentMap[c.appointmentId.toString()] : null
   }));
@@ -772,7 +825,9 @@ const getUnreadCount = async (userId, userRole) => {
       ]
     };
   } else if (userRole === 'PET_OWNER') {
-    conversationQuery = { petOwnerId: userId, conversationType: 'VETERINARIAN_PET_OWNER' };
+    conversationQuery = { petOwnerId: userId, conversationType: { $in: ['VETERINARIAN_PET_OWNER', 'PET_SITTER_PET_OWNER'] } };
+  } else if (userRole === 'PET_SITTER') {
+    conversationQuery = { petSitterId: userId, conversationType: 'PET_SITTER_PET_OWNER' };
   } else if (getAdminSupportTypeForRole(userRole)) {
     conversationQuery = {
       businessId: userId,

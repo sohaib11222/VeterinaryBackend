@@ -313,9 +313,25 @@ const uploadMultipleChatFiles = (folderName, maxCount = 10) => {
   };
 };
 
+const uploadPetSitterRegistration = () => {
+  const storage = getMulterStorage('profile');
+  const fileFilter = (req, file, cb) => {
+    const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    cb(null, allowedMimes.includes(file.mimetype));
+  };
+  const upload = multer({ storage, fileFilter, limits: { fileSize: 25 * 1024 * 1024, files: 6 } });
+  return (req, res, next) => upload.fields([{ name: 'file', maxCount: 1 }, { name: 'documents', maxCount: 5 }])(req, res, (err) => {
+    if (err) return sendError(res, 'Invalid registration upload', HTTP_STATUS.BAD_REQUEST, [{ message: err.message }]);
+    const profileFile = req.files?.file?.[0];
+    if (!profileFile || !['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(profileFile.mimetype)) return sendError(res, 'Profile photo is required and must be an image', HTTP_STATUS.BAD_REQUEST);
+    next();
+  });
+};
+
 module.exports = {
   uploadSingleImage,
   uploadMultipleImages,
   uploadSingleChatFile,
-  uploadMultipleChatFiles
+  uploadMultipleChatFiles,
+  uploadPetSitterRegistration
 };

@@ -3,9 +3,11 @@ const router = express.Router();
 const authController = require('../controllers/auth.controller');
 const { authGuard } = require('../middleware/authGuard');
 const asyncHandler = require('../middleware/asyncHandler');
+const { uploadPetSitterRegistration } = require('../middleware/upload.middleware');
 
 // Public routes
 router.post('/register', asyncHandler(authController.register));
+router.post('/register-pet-sitter', uploadPetSitterRegistration(), asyncHandler(authController.registerPetSitter));
 router.post('/verify-email', asyncHandler(authController.verifyEmail));
 router.post('/resend-email-verification', asyncHandler(authController.resendEmailVerification));
 router.post('/login', asyncHandler(authController.login));

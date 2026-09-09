@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const VeterinarianProfile = require('../models/VeterinarianProfile');
+const PetSitterProfile = require('../models/PetSitterProfile');
 const PasswordReset = require('../models/PasswordReset');
 const crypto = require('crypto');
 const { generateToken, generateRefreshToken } = require('../utils/jwt');
@@ -135,7 +136,7 @@ const register = async (data) => {
     // A user who submitted the pet-owner form but did not finish email
     // verification can safely restart the flow and receive a fresh code.
     if (
-      existingUser.role === USER_ROLES.PET_OWNER &&
+      [USER_ROLES.PET_OWNER, USER_ROLES.PET_SITTER].includes(existingUser.role) &&
       existingUser.emailVerificationRequired &&
       !existingUser.isEmailVerified &&
       normalizeEmail(existingUser.email) === normalizeEmail(email)
@@ -162,8 +163,9 @@ const register = async (data) => {
   const isPetStore = normalizedRole === USER_ROLES.PET_STORE;
   const isParapharmacy = normalizedRole === USER_ROLES.PARAPHARMACY;
   const isVeterinarian = normalizedRole === USER_ROLES.VETERINARIAN;
+  const isPetSitter = normalizedRole === USER_ROLES.PET_SITTER;
 
-  const requiresEmailVerification = normalizedRole === USER_ROLES.PET_OWNER;
+  const requiresEmailVerification = [USER_ROLES.PET_OWNER, USER_ROLES.PET_SITTER].includes(normalizedRole);
   let status = requiresEmailVerification ? USER_STATUS.PENDING : USER_STATUS.APPROVED;
   if ([USER_ROLES.VETERINARIAN, USER_ROLES.PET_STORE, USER_ROLES.PARAPHARMACY].includes(normalizedRole)) {
     status = USER_STATUS.PENDING;
@@ -175,6 +177,7 @@ const register = async (data) => {
 
   const user = await User.create({
     name,
+    fullName: data.fullName || name || null,
     email,
     phone: phone ? String(phone).trim() : phone,
     password,
@@ -183,6 +186,10 @@ const register = async (data) => {
     isPhoneVerified: false,
     isEmailVerified: !requiresEmailVerification,
     emailVerificationRequired: requiresEmailVerification,
+    profileImage: data.profileImage || null,
+    gender: data.gender || null,
+    dob: data.dob || null,
+    address: data.address || undefined,
   });
 
   if (requiresPhoneVerification(normalizedRole)) {
@@ -201,6 +208,23 @@ const register = async (data) => {
     });
     // Link profile to user
     user.veterinarianProfile = veterinarianProfile._id;
+    await user.save();
+  }
+
+  if (isPetSitter) {
+    const petSitterProfile = await PetSitterProfile.create({
+      userId: user._id,
+      bio: data.bio || data.aboutMe || '',
+      experienceYears: Number(data.experienceYears || data.experience || 0),
+      petSittingExperience: data.petSittingExperience || '',
+      servicesOffered: Array.isArray(data.servicesOffered) ? data.servicesOffered : [],
+      petTypes: Array.isArray(data.petTypes) ? data.petTypes : [],
+      availability: Array.isArray(data.availability) ? data.availability : [],
+      certifications: Array.isArray(data.certifications) ? data.certifications : [],
+      documents: Array.isArray(data.documents) ? data.documents : [],
+      profileCompleted: Boolean(data.bio || data.petTypes?.length || data.servicesOffered?.length),
+    });
+    user.petSitterProfile = petSitterProfile._id;
     await user.save();
   }
 
@@ -266,8 +290,8 @@ const verifyEmail = async (email, code) => {
   }
 
   const user = await User.findById(verification.userId);
-  if (!user || user.role !== USER_ROLES.PET_OWNER) {
-    throw new Error('Pet owner account not found');
+  if (!user || ![USER_ROLES.PET_OWNER, USER_ROLES.PET_SITTER].includes(user.role)) {
+    throw new Error('Account not found');
   }
 
   user.isEmailVerified = true;
@@ -276,8 +300,8 @@ const verifyEmail = async (email, code) => {
   verification.isUsed = true;
   await Promise.all([user.save(), verification.save()]);
 
-  await sendWelcomeEmail({ name: user.name, email: user.email }).catch((error) => {
-    console.error('[email] Failed to send pet owner welcome email:', error.message);
+  await sendWelcomeEmail({ name: user.fullName || user.name, email: user.email }).catch((error) => {
+    console.error('[email] Failed to send welcome email:', error.message);
   });
 
   const token = generateToken({
@@ -308,7 +332,7 @@ const resendEmailVerification = async (email) => {
   if (!normalizedEmail) throw new Error('Email address is required');
 
   const user = await User.findOne({ email: normalizedEmail });
-  if (!user || user.role !== USER_ROLES.PET_OWNER || !user.emailVerificationRequired || user.isEmailVerified) {
+  if (!user || ![USER_ROLES.PET_OWNER, USER_ROLES.PET_SITTER].includes(user.role) || !user.emailVerificationRequired || user.isEmailVerified) {
     return;
   }
 
@@ -452,7 +476,7 @@ const login = async (data) => {
     throw new Error('Account is blocked. Please contact admin');
   }
 
-  if (user.role === USER_ROLES.PET_OWNER && user.emailVerificationRequired && !user.isEmailVerified) {
+  if ([USER_ROLES.PET_OWNER, USER_ROLES.PET_SITTER].includes(user.role) && user.emailVerificationRequired && !user.isEmailVerified) {
     throw new Error('Please verify your email address before logging in');
   }
 

@@ -13,6 +13,42 @@ exports.register = asyncHandler(async (req, res) => {
   return sendSuccess(res, message, result, 201);
 });
 
+exports.registerPetSitter = asyncHandler(async (req, res) => {
+  const profileFile = req.files?.file?.[0];
+  if (!profileFile) throw new Error('Profile photo is required');
+  const path = require('path');
+  const filePath = path.relative(path.join(process.cwd(), 'uploads'), profileFile.path);
+  const parse = (value, fallback = []) => {
+    if (value === undefined || value === null || value === '') return fallback;
+    try { return JSON.parse(value); } catch (_) { return String(value).split(',').map((item) => item.trim()).filter(Boolean); }
+  };
+  const documents = (req.files?.documents || []).map((file) => ({
+    fileUrl: `/uploads/${path.relative(path.join(process.cwd(), 'uploads'), file.path).replace(/\\/g, '/')}`,
+    name: file.originalname,
+    type: 'CERTIFICATION',
+    uploadedAt: new Date(),
+  }));
+  const result = await authService.register({
+    ...req.body,
+    role: 'PET_SITTER',
+    fullName: req.body.fullName || req.body.name,
+    profileImage: `/uploads/${filePath.replace(/\\/g, '/')}`,
+    address: {
+      line1: req.body.address || null,
+      city: req.body.city || null,
+      state: req.body.province || req.body.state || null,
+      country: req.body.region || req.body.country || null,
+    },
+    experienceYears: Number(req.body.experienceYears || req.body.experience || 0),
+    servicesOffered: parse(req.body.servicesOffered),
+    petTypes: parse(req.body.petTypes),
+    availability: parse(req.body.availability),
+    certifications: parse(req.body.certifications),
+    documents,
+  });
+  return sendSuccess(res, 'Verification code sent to your email address', result, 201);
+});
+
 exports.verifyEmail = asyncHandler(async (req, res) => {
   const result = await authService.verifyEmail(req.body.email, req.body.code);
   return sendSuccess(res, 'Email verified successfully', result);

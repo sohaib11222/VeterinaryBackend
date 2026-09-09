@@ -2,11 +2,15 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const { authGuard, requireRole } = require('../middleware/authGuard');
+const petSitterController = require('../controllers/petSitter.controller');
 const asyncHandler = require('../middleware/asyncHandler');
 
 // All admin routes require authentication and ADMIN role
 router.use(authGuard());
 router.use(requireRole('ADMIN'));
+
+router.get('/pet-sitters', asyncHandler(petSitterController.listAdmin));
+router.patch('/pet-sitters/:id/status', asyncHandler(petSitterController.updateStatus));
 
 /**
  * Get admin dashboard

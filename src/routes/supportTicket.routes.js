@@ -9,12 +9,12 @@ const router = express.Router();
 // Support evidence is private and can only be downloaded through the guarded route below.
 router.post(
   '/attachments',
-  authGuard(['PET_OWNER', 'ADMIN']),
+  authGuard(['PET_OWNER', 'PET_SITTER', 'ADMIN']),
   uploadMultipleImages('supportTicket', 5),
   supportTicketController.uploadAttachments,
 );
 
-router.get('/attachments/:attachmentId/download', authGuard(['PET_OWNER', 'ADMIN']), supportTicketController.downloadAttachment);
+router.get('/attachments/:attachmentId/download', authGuard(['PET_OWNER', 'PET_SITTER', 'ADMIN']), supportTicketController.downloadAttachment);
 
 router.get('/admin', authGuard(['ADMIN']), supportTicketController.listAdmin);
 router.get('/admin/unread-count', authGuard(['ADMIN']), supportTicketController.getAdminUnreadCount);
@@ -22,11 +22,11 @@ router.get('/admin/:ticketId', authGuard(['ADMIN']), supportTicketController.get
 router.patch('/admin/:ticketId', authGuard(['ADMIN']), supportTicketController.updateAdmin);
 router.post('/admin/:ticketId/messages', authGuard(['ADMIN']), supportTicketController.replyAdmin);
 
-router.get('/unread-count', authGuard(['PET_OWNER']), supportTicketController.getMyUnreadCount);
-router.get('/', authGuard(['PET_OWNER']), supportTicketController.listMine);
-router.post('/', authGuard(['PET_OWNER']), supportTicketController.create);
-router.get('/:ticketId', authGuard(['PET_OWNER']), supportTicketController.getMine);
-router.post('/:ticketId/messages', authGuard(['PET_OWNER']), supportTicketController.reply);
-router.post('/:ticketId/reopen', authGuard(['PET_OWNER']), supportTicketController.reopen);
+router.get('/unread-count', authGuard(['PET_OWNER', 'PET_SITTER']), supportTicketController.getMyUnreadCount);
+router.get('/', authGuard(['PET_OWNER', 'PET_SITTER']), supportTicketController.listMine);
+router.post('/', authGuard(['PET_OWNER', 'PET_SITTER']), supportTicketController.create);
+router.get('/:ticketId', authGuard(['PET_OWNER', 'PET_SITTER']), supportTicketController.getMine);
+router.post('/:ticketId/messages', authGuard(['PET_OWNER', 'PET_SITTER']), supportTicketController.reply);
+router.post('/:ticketId/reopen', authGuard(['PET_OWNER', 'PET_SITTER']), supportTicketController.reopen);
 
 module.exports = router;
