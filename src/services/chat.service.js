@@ -168,9 +168,131 @@ const consolidateVeterinarianPetOwnerConversations = async (veterinarianId, petO
   return canonicalConversation;
 };
 
+/**
+ * Pet Sitter conversations are relationship chats, not appointment chats.
+ * Keep one active conversation for each Pet Owner/Pet Sitter pair and move
+ * messages from older duplicate records into the canonical conversation.
+ */
+const consolidatePetSitterConversations = async (petSitterId, petOwnerId) => {
+  const conversations = await Conversation.find({
+    petSitterId,
+    petOwnerId,
+    conversationType: 'PET_SITTER_PET_OWNER',
+    mergedInto: null,
+  }).sort({ lastMessageAt: -1, updatedAt: -1 });
+
+  if (conversations.length === 0) return null;
+  const canonicalConversation = conversations[0];
+  const duplicateConversations = conversations.slice(1);
+  if (duplicateConversations.length === 0) return canonicalConversation;
+
+  const duplicateIds = duplicateConversations.map((conversation) => conversation._id);
+  await ChatMessage.updateMany(
+    { conversationId: { $in: duplicateIds } },
+    { $set: { conversationId: canonicalConversation._id } }
+  );
+  await Conversation.updateMany(
+    { _id: { $in: duplicateIds } },
+    { $set: { mergedInto: canonicalConversation._id } }
+  );
+
+  const newestConversation = conversations.reduce((newest, conversation) => {
+    const newestTime = newest?.lastMessageAt ? new Date(newest.lastMessageAt).getTime() : 0;
+    const candidateTime = conversation?.lastMessageAt ? new Date(conversation.lastMessageAt).getTime() : 0;
+    return candidateTime > newestTime ? conversation : newest;
+  }, canonicalConversation);
+
+  if (newestConversation.lastMessageAt &&
+      (!canonicalConversation.lastMessageAt || new Date(newestConversation.lastMessageAt) > new Date(canonicalConversation.lastMessageAt))) {
+    canonicalConversation.lastMessageAt = newestConversation.lastMessageAt;
+    canonicalConversation.lastMessage = newestConversation.lastMessage;
+  }
+  canonicalConversation.unreadCount = Math.max(...conversations.map((conversation) => conversation.unreadCount || 0));
+  if (conversations.some((conversation) => conversation.status === 'ACTIVE')) canonicalConversation.status = 'ACTIVE';
+  await canonicalConversation.save();
+
+  return canonicalConversation;
+};
+
+const findOrCreatePetSitterConversation = async (petSitterId, petOwnerId) => {
+  const conversationQuery = {
+    petSitterId,
+    petOwnerId,
+    conversationType: 'PET_SITTER_PET_OWNER',
+    mergedInto: null,
+  };
+  let conversation = await Conversation.findOne(conversationQuery).maxTimeMS(2000);
+  if (conversation) return resolveMergedConversation(conversation);
+
+  try {
+    conversation = await Conversation.create({
+      ...conversationQuery,
+      lastMessageAt: new Date(),
+    });
+  } catch (error) {
+    // The unique active-pair index protects simultaneous clicks/requests.
+    // If another request won the race, return its conversation instead.
+    if (error?.code !== 11000) throw error;
+    conversation = await Conversation.findOne(conversationQuery).maxTimeMS(2000);
+  }
+  if (!conversation) throw new Error('Unable to prepare the Pet Sitter conversation');
+  return resolveMergedConversation(conversation);
+};
+
+/**
+ * Reconcile old duplicate records before the unique index is created. This
+ * runs during server startup and is safe to run repeatedly.
+ */
+const preparePetSitterConversationIndex = async () => {
+  const duplicateRelationships = await Conversation.aggregate([
+    {
+      $match: {
+        conversationType: 'PET_SITTER_PET_OWNER',
+        mergedInto: null,
+      },
+    },
+    {
+      $group: {
+        _id: { petSitterId: '$petSitterId', petOwnerId: '$petOwnerId' },
+        count: { $sum: 1 },
+      },
+    },
+    { $match: { count: { $gt: 1 } } },
+  ]).option({ maxTimeMS: 5000 });
+
+  for (const { _id: relationship } of duplicateRelationships) {
+    await consolidatePetSitterConversations(relationship.petSitterId, relationship.petOwnerId);
+  }
+
+  await Conversation.collection.createIndex(
+    { petSitterId: 1, petOwnerId: 1, conversationType: 1, mergedInto: 1 },
+    {
+      name: 'unique_active_pet_sitter_pet_owner_conversation',
+      unique: true,
+      partialFilterExpression: {
+        conversationType: 'PET_SITTER_PET_OWNER',
+        mergedInto: null,
+      },
+    }
+  );
+};
+
 const consolidateLegacyConversationsForUser = async (userId, userRole) => {
   if (!mongoose.Types.ObjectId.isValid(userId)) return;
-  if (userRole !== 'VETERINARIAN' && userRole !== 'PET_OWNER') return;
+  if (!['VETERINARIAN', 'PET_OWNER', 'PET_SITTER'].includes(userRole)) return;
+
+  if (userRole === 'PET_SITTER') {
+    const duplicateRelationships = await Conversation.aggregate([
+      { $match: { petSitterId: new mongoose.Types.ObjectId(userId), conversationType: 'PET_SITTER_PET_OWNER', mergedInto: null } },
+      { $group: { _id: { petSitterId: '$petSitterId', petOwnerId: '$petOwnerId' }, count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 50 },
+    ]).option({ maxTimeMS: 3000 });
+    await Promise.all(duplicateRelationships.map(({ _id: relationship }) =>
+      consolidatePetSitterConversations(relationship.petSitterId, relationship.petOwnerId)
+    ));
+    return;
+  }
 
   const userObjectId = new mongoose.Types.ObjectId(userId);
   const userMatch = userRole === 'VETERINARIAN'
@@ -198,6 +320,18 @@ const consolidateLegacyConversationsForUser = async (userId, userRole) => {
   await Promise.all(duplicateRelationships.map(({ _id: relationship }) =>
     consolidateVeterinarianPetOwnerConversations(relationship.veterinarianId, relationship.petOwnerId)
   ));
+
+  if (userRole === 'PET_OWNER') {
+    const duplicatePetSitterRelationships = await Conversation.aggregate([
+      { $match: { petOwnerId: userObjectId, conversationType: 'PET_SITTER_PET_OWNER', mergedInto: null } },
+      { $group: { _id: { petSitterId: '$petSitterId', petOwnerId: '$petOwnerId' }, count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 50 },
+    ]).option({ maxTimeMS: 3000 });
+    await Promise.all(duplicatePetSitterRelationships.map(({ _id: relationship }) =>
+      consolidatePetSitterConversations(relationship.petSitterId, relationship.petOwnerId)
+    ));
+  }
 };
 
 /**
@@ -253,12 +387,15 @@ const sendMessage = async (data) => {
     if (!sameId(senderId, petSitterId) && !sameId(senderId, petOwnerId)) throw new Error('Sender must be either pet sitter or pet owner');
     let conversation = conversationId
       ? await Conversation.findById(conversationId)
-      : await Conversation.findOne({ petSitterId, petOwnerId, conversationType: 'PET_SITTER_PET_OWNER', mergedInto: null });
+      : null;
     conversation = await resolveMergedConversation(conversation);
     if (conversation && (!sameId(conversation.petSitterId, petSitterId) || !sameId(conversation.petOwnerId, petOwnerId))) {
       throw new Error('Conversation does not belong to this pet sitter and pet owner');
     }
-    if (!conversation) conversation = await Conversation.create({ petSitterId, petOwnerId, conversationType: 'PET_SITTER_PET_OWNER', lastMessageAt: new Date() });
+    if (!conversation) {
+      await consolidatePetSitterConversations(petSitterId, petOwnerId);
+      conversation = await findOrCreatePetSitterConversation(petSitterId, petOwnerId);
+    }
     const sentAt = new Date();
     conversation.lastMessageAt = sentAt;
     conversation.lastMessage = { message: messageText || (resolvedFileName ? `File: ${resolvedFileName}` : ''), sentAt, sentBy: senderId, readBy: [senderId] };
@@ -523,8 +660,8 @@ const getOrCreateConversation = async (
     if (!petSitter || petSitter.role !== 'PET_SITTER') throw new Error('Pet sitter not found');
     if (!petOwner || petOwner.role !== 'PET_OWNER') throw new Error('Pet owner not found');
     if (actorId && !sameId(actorId, petSitterId) && !sameId(actorId, petOwnerId)) throw new Error('You do not have access to this conversation');
-    let conversation = await Conversation.findOne({ petSitterId, petOwnerId, conversationType: 'PET_SITTER_PET_OWNER', mergedInto: null }).maxTimeMS(2000);
-    if (!conversation) conversation = await Conversation.create({ petSitterId, petOwnerId, conversationType: 'PET_SITTER_PET_OWNER', lastMessageAt: new Date() });
+    await consolidatePetSitterConversations(petSitterId, petOwnerId);
+    let conversation = await findOrCreatePetSitterConversation(petSitterId, petOwnerId);
     await conversation.populate([
       { path: 'petSitterId', select: 'name fullName email phone profileImage role' },
       { path: 'petOwnerId', select: 'name fullName email phone profileImage role' },
@@ -910,5 +1047,6 @@ module.exports = {
   getConversations,
   markMessagesAsRead,
   getUnreadCount,
-  markConversationComplete
+  markConversationComplete,
+  preparePetSitterConversationIndex,
 };

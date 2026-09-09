@@ -11,6 +11,10 @@ const normalizeArray = (value) => {
   return [];
 };
 
+const escapeRegExp = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const contains = (value) => ({ $regex: escapeRegExp(value), $options: 'i' });
+
 const publicProfile = (user, profile) => ({
   id: user._id,
   name: user.fullName || user.name,
@@ -40,12 +44,18 @@ const listPublic = async (options = {}) => {
   const limit = Math.min(100, Math.max(1, Number(options.limit) || 20));
   const search = String(options.search || '').trim();
   const petType = String(options.petType || '').trim().toUpperCase();
+  const city = String(options.city || '').trim();
+  const province = String(options.province || options.state || '').trim();
+  const postalCode = String(options.postalCode || options.cap || options.zip || '').trim();
   const query = { role: USER_ROLES.PET_SITTER, status: USER_STATUS.APPROVED };
   if (search) query.$or = [
-    { name: { $regex: search, $options: 'i' } },
-    { fullName: { $regex: search, $options: 'i' } },
-    { 'address.city': { $regex: search, $options: 'i' } },
+    { name: contains(search) },
+    { fullName: contains(search) },
+    { 'address.city': contains(search) },
   ];
+  if (city) query['address.city'] = contains(city);
+  if (province) query['address.state'] = contains(province);
+  if (postalCode) query['address.zip'] = contains(postalCode);
   const profileQuery = petType
     ? { petTypes: petType, isAvailable: true, profileCompleted: true }
     : { isAvailable: true, profileCompleted: true };

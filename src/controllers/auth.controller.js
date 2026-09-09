@@ -38,6 +38,7 @@ exports.registerPetSitter = asyncHandler(async (req, res) => {
       city: req.body.city || null,
       state: req.body.province || req.body.state || null,
       country: req.body.region || req.body.country || null,
+      zip: req.body.postalCode || req.body.cap || req.body.zip || null,
     },
     experienceYears: Number(req.body.experienceYears || req.body.experience || 0),
     servicesOffered: parse(req.body.servicesOffered),

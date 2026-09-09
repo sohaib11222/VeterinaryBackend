@@ -4,6 +4,7 @@ const config = require("./config/env");
 const { runAppointmentNotifications } = require("./workers/appointmentNotification.worker");
 const { runVaccinationNotifications } = require("./workers/vaccinationNotification.worker");
 const { runSubscriptionExpiryNotifications } = require("./workers/subscriptionExpiry.worker");
+const { preparePetSitterConversationIndex } = require("./services/chat.service");
 
 const PORT = config.PORT || 5000;
 
@@ -11,6 +12,11 @@ const PORT = config.PORT || 5000;
   try {
     await connectDB();
     console.log("✓ Connected to MongoDB");
+
+    // Consolidate any legacy Pet Owner/Pet Sitter duplicates before creating
+    // the unique active-pair index used to prevent duplicate conversations.
+    await preparePetSitterConversationIndex();
+    console.log("✓ Pet Sitter conversation uniqueness prepared");
 
     app.listen(PORT, () => {
       console.log(`✓ Veterinary Backend API running on port ${PORT}`);
