@@ -11,8 +11,8 @@ if (fs.existsSync(envPath)) {
 const mongoose = require('mongoose');
 const User = require('../models/User');
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@veterinary.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123456';
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ADMIN_NAME = process.env.ADMIN_NAME || 'Admin User';
 
 const MONGODB_URI =
@@ -33,6 +33,9 @@ async function seedAdmin() {
     if (!MONGODB_URI) {
       throw new Error('Missing MONGO_URI (or MONGODB_URI). Refusing to seed to avoid writing to the wrong database.');
     }
+    if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+      throw new Error('Missing ADMIN_EMAIL or ADMIN_PASSWORD. Refusing to create/update an admin without explicit credentials.');
+    }
 
     const sanitizedUri = String(MONGODB_URI)
       .replace(/:\/\/.*?:.*?@/, '://***:***@')
@@ -52,7 +55,7 @@ async function seedAdmin() {
     if (admin) {
       console.log('⚠️  Admin user already exists, updating...\n');
 
-      admin.password = ADMIN_PASSWORD; // ✅ PLAIN PASSWORD
+      admin.password = ADMIN_PASSWORD;
       admin.fullName = ADMIN_NAME;
       admin.role = 'ADMIN';
       admin.status = 'APPROVED';
@@ -65,7 +68,7 @@ async function seedAdmin() {
 
       admin = await User.create({
         email: ADMIN_EMAIL.toLowerCase(),
-        password: ADMIN_PASSWORD, // ✅ PLAIN PASSWORD
+        password: ADMIN_PASSWORD,
         fullName: ADMIN_NAME,
         role: 'ADMIN',
         status: 'APPROVED',
@@ -78,7 +81,6 @@ async function seedAdmin() {
     console.log('✅ ADMIN USER SEEDED SUCCESSFULLY!');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('📧 Email:', admin.email);
-    console.log('🔑 Password:', ADMIN_PASSWORD);
     console.log('👤 Name:', admin.fullName);
     console.log('🎭 Role:', admin.role);
     console.log('📊 Status:', admin.status);

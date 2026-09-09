@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "seed:admin": "node src/seeders/admin.seeder.js",
+    "admin:password": "node src/scripts/update-admin-password.js",
     "seed:vaccines": "node src/seeders/vaccine.seeder.js"
   },
   "keywords": [

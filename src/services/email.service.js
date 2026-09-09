@@ -11,10 +11,10 @@ const escapeHtml = (value) => String(value ?? '')
   .replace(/'/g, '&#039;');
 
 const formatDate = (value) => {
-  if (!value) return 'Not specified';
+  if (!value) return 'Non specificato';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat('en-GB', {
+  return new Intl.DateTimeFormat('it-IT', {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
@@ -22,7 +22,22 @@ const formatDate = (value) => {
   }).format(date);
 };
 
-const formatAmount = (value) => `€${Number(value || 0).toFixed(2)}`;
+const formatAmount = (value) => new Intl.NumberFormat('it-IT', {
+  style: 'currency',
+  currency: 'EUR',
+}).format(Number(value || 0));
+
+const paymentStatusLabel = (value) => {
+  const labels = {
+    PAID: 'Pagato',
+    UNPAID: 'Non pagato',
+    PENDING: 'In attesa',
+    FAILED: 'Fallito',
+    REFUNDED: 'Rimborsato',
+    CANCELLED: 'Annullato',
+  };
+  return labels[String(value || '').toUpperCase()] || value || 'Non specificato';
+};
 
 const detailsTable = (details) => {
   const rows = details
@@ -41,7 +56,7 @@ const detailsTable = (details) => {
 
 const emailLayout = ({ title, preview, body }) => `
   <!doctype html>
-  <html lang="en">
+  <html lang="it">
     <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
     <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
       <span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;">${escapeHtml(preview || title)}</span>
@@ -50,14 +65,14 @@ const emailLayout = ({ title, preview, body }) => `
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 18px rgba(31,41,55,.08);">
             <tr><td style="background:linear-gradient(135deg,#1d5b8f,#2d92b5);padding:28px 34px;color:#ffffff;">
               <div style="font-size:24px;font-weight:700;">MyPetPlus</div>
-              <div style="font-size:13px;opacity:.9;margin-top:4px;">Better care for every pet</div>
+              <div style="font-size:13px;opacity:.9;margin-top:4px;">La cura migliore per ogni animale</div>
             </td></tr>
             <tr><td style="padding:32px 34px;">
               <h1 style="font-size:23px;line-height:1.35;margin:0 0 18px;color:#172033;">${escapeHtml(title)}</h1>
               ${body}
             </td></tr>
             <tr><td style="padding:18px 34px;background:#f8fafc;color:#6b7280;font-size:12px;line-height:1.5;">
-              This is an automated MyPetPlus email. Please do not reply directly to this message.
+              Questa è un'email automatica di MyPetPlus. Ti preghiamo di non rispondere direttamente a questo messaggio.
             </td></tr>
           </table>
         </td></tr>
@@ -129,75 +144,79 @@ const sendEmail = async ({ to, subject, text, html }) => {
 };
 
 const sendWelcomeEmail = async ({ name, email }) => {
-  const displayName = name || 'there';
+  const displayName = name || 'utente';
   const safeName = escapeHtml(displayName);
   const accountUrl = escapeHtml(`${env.APP_URL}/login`);
   return sendEmail({
     to: email,
-    subject: 'Welcome to MyPetPlus',
-    text: `Hi ${displayName},\n\nWelcome to MyPetPlus — we are happy to have you with us. Your pet-care account has been created successfully.\n\nWith MyPetPlus, you can manage your pets' profiles and health information, book appointments with veterinarians, review medical records, communicate with your care team, and order from participating pharmacies.\n\nSign in to explore your account: ${env.APP_URL}/login\n\nThe MyPetPlus Team`,
+    subject: 'Benvenuto su MyPetPlus',
+    text: `Ciao ${displayName},\n\nBenvenuto su MyPetPlus: siamo felici di averti con noi. Il tuo account per la cura dei tuoi animali è stato creato con successo.\n\nCon MyPetPlus puoi gestire i profili e le informazioni sanitarie dei tuoi animali, prenotare appuntamenti con i veterinari, consultare le cartelle cliniche, comunicare con il tuo team di assistenza e ordinare prodotti presso le farmacie aderenti.\n\nAccedi per esplorare il tuo account: ${env.APP_URL}/login\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: 'Welcome to MyPetPlus',
-      preview: 'Your MyPetPlus pet-care account is ready.',
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${safeName},</p>
-        <p style="font-size:16px;line-height:1.7;">Welcome to <strong>MyPetPlus</strong> — we are delighted to have you and your pets with us.</p>
-        <div style="margin:22px 0;padding:18px 20px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:10px;font-size:15px;line-height:1.65;color:#1f2937;">Your pet-care account has been created successfully. MyPetPlus brings your pet's everyday care, appointments, records, and pharmacy needs together in one place.</div>
-        <h2 style="font-size:17px;margin:24px 0 10px;color:#172033;">What you can do next</h2>
+      title: 'Benvenuto su MyPetPlus',
+      preview: 'Il tuo account MyPetPlus è pronto.',
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${safeName},</p>
+        <p style="font-size:16px;line-height:1.7;">Benvenuto su <strong>MyPetPlus</strong>: siamo felici di accompagnare te e i tuoi animali.</p>
+        <div style="margin:22px 0;padding:18px 20px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:10px;font-size:15px;line-height:1.65;color:#1f2937;">Il tuo account per la cura degli animali è stato creato con successo. MyPetPlus riunisce in un unico luogo la cura quotidiana, gli appuntamenti, la documentazione sanitaria e le esigenze farmaceutiche dei tuoi animali.</div>
+        <h2 style="font-size:17px;margin:24px 0 10px;color:#172033;">Cosa puoi fare ora</h2>
         <ul style="margin:0;padding-left:22px;color:#4b5563;font-size:15px;line-height:1.8;">
-          <li>Add and manage your pets' profiles.</li>
-          <li>Book appointments with veterinarians and follow appointment updates.</li>
-          <li>Keep medical records, reports, and health information organised.</li>
-          <li>Chat with your care team and order products from participating pharmacies.</li>
+          <li>Aggiungere e gestire i profili dei tuoi animali.</li>
+          <li>Prenotare appuntamenti con i veterinari e seguirne gli aggiornamenti.</li>
+          <li>Organizzare cartelle cliniche, referti e informazioni sanitarie.</li>
+          <li>Chattare con il tuo team di assistenza e ordinare prodotti dalle farmacie aderenti.</li>
         </ul>
-        <p style="margin:26px 0 0;text-align:center;"><a href="${accountUrl}" style="display:inline-block;padding:13px 24px;border-radius:8px;background:#149b99;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Go to My Account</a></p>
-        <p style="font-size:14px;line-height:1.65;color:#6b7280;margin:24px 0 0;">Thank you for choosing MyPetPlus to support the health and wellbeing of your pets.</p>`,
+        <p style="margin:26px 0 0;text-align:center;"><a href="${accountUrl}" style="display:inline-block;padding:13px 24px;border-radius:8px;background:#149b99;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Vai al mio account</a></p>
+        <p style="font-size:14px;line-height:1.65;color:#6b7280;margin:24px 0 0;">Grazie per aver scelto MyPetPlus per sostenere la salute e il benessere dei tuoi animali.</p>`,
     }),
   });
 };
 
-const subscriptionRoleLabel = (role) => String(role || '').toUpperCase() === 'PET_STORE' ? 'Pharmacy' : 'Doctor';
+const subscriptionRoleLabel = (role) => {
+  const normalizedRole = String(role || '').toUpperCase();
+  if (normalizedRole === 'PARAPHARMACY') return 'Parafarmacia';
+  return normalizedRole === 'PET_STORE' ? 'Farmacia' : 'Veterinario';
+};
 
 const subscriptionPanelUrl = (role) => String(role || '').toUpperCase() === 'PET_STORE'
   ? `${env.APP_URL}/pharmacy-admin/subscription`
   : `${env.APP_URL}/doctor/subscription-plans`;
 
 const sendSubscriptionPurchaseEmail = async ({ user, subscription, plan, role }) => {
-  const displayName = user?.name || 'there';
+  const displayName = user?.name || 'utente';
   const roleLabel = subscriptionRoleLabel(role || user?.role);
-  const planName = plan?.name || 'Subscription plan';
+  const planName = plan?.name || 'Piano di abbonamento';
   const startDate = formatDate(subscription?.startDate);
   const endDate = formatDate(subscription?.endDate);
   const amount = formatAmount(plan?.price);
-  const duration = plan?.durationInDays ? `${plan.durationInDays} days` : 'Not specified';
+  const duration = plan?.durationInDays ? `${plan.durationInDays} giorni` : 'Non specificata';
   const panelUrl = escapeHtml(subscriptionPanelUrl(role || user?.role));
 
   return sendEmail({
     to: user?.email,
-    subject: `Your MyPetPlus ${planName} subscription is active`,
-    text: `Hi ${displayName},\n\nYour ${roleLabel} subscription has been purchased successfully and is now active.\n\nPlan: ${planName}\nAmount: ${amount}\nStart date: ${startDate}\nExpiry date: ${endDate}\nDuration: ${duration}\n\nYou can sign in to your MyPetPlus panel to use and manage your subscription: ${subscriptionPanelUrl(role || user?.role)}\n\nThe MyPetPlus Team`,
+    subject: `Il tuo abbonamento MyPetPlus ${planName} è attivo`,
+    text: `Ciao ${displayName},\n\nil tuo abbonamento ${roleLabel} è stato acquistato con successo ed è ora attivo.\n\nPiano: ${planName}\nImporto: ${amount}\nData di inizio: ${startDate}\nData di scadenza: ${endDate}\nDurata: ${duration}\n\nAccedi al pannello MyPetPlus per utilizzare e gestire il tuo abbonamento: ${subscriptionPanelUrl(role || user?.role)}\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: 'Your subscription is active',
-      preview: `${planName} subscription purchased successfully.`,
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(displayName)},</p>
-        <p style="font-size:15px;line-height:1.65;">Your <strong>${escapeHtml(roleLabel)}</strong> subscription has been purchased successfully and is now active.</p>
+      title: 'Il tuo abbonamento è attivo',
+      preview: `Il piano ${planName} è stato acquistato con successo.`,
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${escapeHtml(displayName)},</p>
+        <p style="font-size:15px;line-height:1.65;">Il tuo abbonamento <strong>${escapeHtml(roleLabel)}</strong> è stato acquistato con successo ed è ora attivo.</p>
         ${detailsTable([
-          ['Plan', planName],
-          ['Amount', amount],
-          ['Start date', startDate],
-          ['Expiry date', endDate],
-          ['Duration', duration],
-          ['Status', 'Active'],
+          ['Piano', planName],
+          ['Importo', amount],
+          ['Data di inizio', startDate],
+          ['Data di scadenza', endDate],
+          ['Durata', duration],
+          ['Stato', 'Attivo'],
         ])}
-        <p style="font-size:14px;line-height:1.65;color:#4b5563;">You can now use the services and features included in your plan.</p>
-        <p style="margin:24px 0 0;text-align:center;"><a href="${panelUrl}" style="display:inline-block;padding:13px 24px;border-radius:8px;background:#149b99;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Open MyPetPlus Panel</a></p>`,
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;">Ora puoi utilizzare i servizi e le funzionalità inclusi nel tuo piano.</p>
+        <p style="margin:24px 0 0;text-align:center;"><a href="${panelUrl}" style="display:inline-block;padding:13px 24px;border-radius:8px;background:#149b99;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Apri il pannello MyPetPlus</a></p>`,
     }),
   });
 };
 
 const sendSubscriptionExpiryEmail = async ({ user, subscription, plan, role }) => {
-  const displayName = user?.name || 'there';
+  const displayName = user?.name || 'utente';
   const roleLabel = subscriptionRoleLabel(role || user?.role);
-  const planName = plan?.name || 'Subscription plan';
+  const planName = plan?.name || 'Piano di abbonamento';
   const startDate = formatDate(subscription?.startDate);
   const endDate = formatDate(subscription?.endDate);
   const amount = formatAmount(plan?.price);
@@ -205,159 +224,159 @@ const sendSubscriptionExpiryEmail = async ({ user, subscription, plan, role }) =
 
   return sendEmail({
     to: user?.email,
-    subject: `Your MyPetPlus subscription has expired`,
-    text: `Hi ${displayName},\n\nYour ${roleLabel} subscription has expired. Please renew your subscription to continue using the available services and features.\n\nPlan: ${planName}\nStart date: ${startDate}\nExpiry date: ${endDate}\nAmount: ${amount}\n\nRenew your subscription in your MyPetPlus panel: ${subscriptionPanelUrl(role || user?.role)}\n\nThe MyPetPlus Team`,
+    subject: 'Il tuo abbonamento MyPetPlus è scaduto',
+    text: `Ciao ${displayName},\n\nil tuo abbonamento ${roleLabel} è scaduto. Rinnova l'abbonamento per continuare a utilizzare i servizi e le funzionalità disponibili.\n\nPiano: ${planName}\nData di inizio: ${startDate}\nData di scadenza: ${endDate}\nImporto: ${amount}\n\nRinnova l'abbonamento dal pannello MyPetPlus: ${subscriptionPanelUrl(role || user?.role)}\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: 'Your subscription has expired',
-      preview: 'Renew your MyPetPlus subscription to continue using the platform.',
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(displayName)},</p>
-        <p style="font-size:16px;line-height:1.7;">Your <strong>${escapeHtml(roleLabel)}</strong> subscription has expired.</p>
-        <div style="margin:22px 0;padding:18px 20px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;font-size:15px;line-height:1.65;color:#9a3412;">Please renew your subscription to continue using the available services and features on MyPetPlus.</div>
+      title: 'Il tuo abbonamento è scaduto',
+      preview: 'Rinnova il tuo abbonamento MyPetPlus per continuare a utilizzare la piattaforma.',
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${escapeHtml(displayName)},</p>
+        <p style="font-size:16px;line-height:1.7;">Il tuo abbonamento <strong>${escapeHtml(roleLabel)}</strong> è scaduto.</p>
+        <div style="margin:22px 0;padding:18px 20px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;font-size:15px;line-height:1.65;color:#9a3412;">Rinnova l'abbonamento per continuare a utilizzare i servizi e le funzionalità disponibili su MyPetPlus.</div>
         ${detailsTable([
-          ['Plan', planName],
-          ['Start date', startDate],
-          ['Expired on', endDate],
-          ['Plan price', amount],
-          ['Status', 'Expired'],
+          ['Piano', planName],
+          ['Data di inizio', startDate],
+          ['Scaduto il', endDate],
+          ['Prezzo del piano', amount],
+          ['Stato', 'Scaduto'],
         ])}
-        <p style="font-size:14px;line-height:1.65;color:#4b5563;">Renewing restores access according to the plan you select.</p>
-        <p style="margin:24px 0 0;text-align:center;"><a href="${panelUrl}" style="display:inline-block;padding:13px 24px;border-radius:8px;background:#149b99;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Renew Subscription</a></p>`,
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;">Il rinnovo ripristinerà l'accesso in base al piano che sceglierai.</p>
+        <p style="margin:24px 0 0;text-align:center;"><a href="${panelUrl}" style="display:inline-block;padding:13px 24px;border-radius:8px;background:#149b99;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Rinnova l'abbonamento</a></p>`,
     }),
   });
 };
 
 const sendApprovalEmail = async ({ name, email, role }) => {
-  const displayName = name || 'there';
+  const displayName = name || 'utente';
   const safeName = escapeHtml(displayName);
   const roleLabel = role === 'VETERINARIAN'
-    ? 'Doctor'
+    ? 'Veterinario'
     : role === 'PARAPHARMACY'
-      ? 'Parapharmacy'
-      : 'Pharmacy';
+      ? 'Parafarmacia'
+      : 'Farmacia';
 
   return sendEmail({
     to: email,
-    subject: 'Your MyPetPlus account has been approved',
-    text: `Hi ${displayName},\n\nYour ${roleLabel} account has been approved. You can now log in to MyPetPlus and start using the platform. Welcome to MyPetPlus!\n\nThe MyPetPlus Team`,
-    html: `<p>Hi ${safeName},</p><p>Your <strong>${roleLabel}</strong> account has been approved.</p><p>You can now log in to MyPetPlus and start using the platform. Welcome to MyPetPlus!</p><p>The MyPetPlus Team</p>`,
+    subject: 'Il tuo account MyPetPlus è stato approvato',
+    text: `Ciao ${displayName},\n\nil tuo account ${roleLabel} è stato approvato. Ora puoi accedere a MyPetPlus e iniziare a utilizzare la piattaforma. Benvenuto su MyPetPlus!\n\nIl team MyPetPlus`,
+    html: `<p>Ciao ${safeName},</p><p>Il tuo account <strong>${roleLabel}</strong> è stato approvato.</p><p>Ora puoi accedere a MyPetPlus e iniziare a utilizzare la piattaforma. Benvenuto su MyPetPlus!</p><p>Il team MyPetPlus</p>`,
   });
 };
 
 const sendPasswordVerificationCodeEmail = async ({ name, email, code, purpose = 'reset' }) => {
-  const displayName = name || 'there';
+  const displayName = name || 'utente';
   const isChange = purpose === 'change';
-  const action = isChange ? 'change your password' : 'reset your password';
+  const action = isChange ? 'modificare la password' : 'reimpostare la password';
   const safeCode = escapeHtml(code);
 
   return sendEmail({
     to: email,
-    subject: `Your MyPetPlus ${isChange ? 'password change' : 'password reset'} code`,
-    text: `Hi ${displayName},\n\nUse this verification code to ${action}: ${code}\n\nThis code expires in 10 minutes. If you did not request this, you can safely ignore this email.\n\nThe MyPetPlus Team`,
+    subject: `Il tuo codice MyPetPlus per ${isChange ? 'modificare la password' : 'reimpostare la password'}`,
+    text: `Ciao ${displayName},\n\nUsa questo codice di verifica per ${action}: ${code}\n\nIl codice scade tra 10 minuti. Se non hai richiesto questa operazione, puoi ignorare questa email.\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: isChange ? 'Confirm your password change' : 'Reset your password',
-      preview: `Your verification code is ${code}`,
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(displayName)},</p>
-        <p style="font-size:15px;line-height:1.65;">Use the verification code below to ${escapeHtml(action)}.</p>
+      title: isChange ? 'Conferma la modifica della password' : 'Reimposta la password',
+      preview: `Il tuo codice di verifica è ${code}`,
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${escapeHtml(displayName)},</p>
+        <p style="font-size:15px;line-height:1.65;">Usa il codice di verifica qui sotto per ${escapeHtml(action)}.</p>
         <div style="margin:24px 0;padding:18px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:10px;text-align:center;font-size:30px;letter-spacing:8px;font-weight:700;color:#1d5b8f;">${safeCode}</div>
-        <p style="font-size:14px;line-height:1.65;color:#4b5563;">This code expires in 10 minutes and can only be used once. If you did not make this request, you can safely ignore this email.</p>`,
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;">Questo codice scade tra 10 minuti e può essere utilizzato una sola volta. Se non hai effettuato questa richiesta, puoi ignorare questa email.</p>`,
     }),
   });
 };
 
 const sendEmailVerificationCodeEmail = async ({ name, email, code }) => {
-  const displayName = name || 'there';
+  const displayName = name || 'utente';
   const safeCode = escapeHtml(code);
 
   return sendEmail({
     to: email,
-    subject: 'Verify your MyPetPlus email address',
-    text: `Hi ${displayName},\n\nUse this verification code to activate your MyPetPlus account: ${code}\n\nThis code expires in 10 minutes. If you did not create this account, you can safely ignore this email.\n\nThe MyPetPlus Team`,
+    subject: 'Verifica il tuo indirizzo email MyPetPlus',
+    text: `Ciao ${displayName},\n\nUsa questo codice di verifica per attivare il tuo account MyPetPlus: ${code}\n\nIl codice scade tra 10 minuti. Se non hai creato questo account, puoi ignorare questa email.\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: 'Verify your email address',
-      preview: `Your MyPetPlus verification code is ${code}`,
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(displayName)},</p>
-        <p style="font-size:15px;line-height:1.65;">Thanks for joining MyPetPlus. Enter the verification code below to activate your pet owner account.</p>
+      title: 'Verifica il tuo indirizzo email',
+      preview: `Il tuo codice di verifica MyPetPlus è ${code}`,
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${escapeHtml(displayName)},</p>
+        <p style="font-size:15px;line-height:1.65;">Grazie per esserti unito a MyPetPlus. Inserisci il codice di verifica qui sotto per attivare il tuo account.</p>
         <div style="margin:24px 0;padding:18px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:10px;text-align:center;font-size:30px;letter-spacing:8px;font-weight:700;color:#1d5b8f;">${safeCode}</div>
-        <p style="font-size:14px;line-height:1.65;color:#4b5563;">This code expires in 10 minutes and can only be used once. If you did not create this account, you can safely ignore this email.</p>`,
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;">Questo codice scade tra 10 minuti e può essere utilizzato una sola volta. Se non hai creato questo account, puoi ignorare questa email.</p>`,
     }),
   });
 };
 
 const sendAppointmentBookedEmail = async ({ veterinarian, petOwner, pet, appointment }) => {
-  const doctorName = veterinarian?.name || 'Doctor';
-  const patientName = petOwner?.name || 'A patient';
-  const petName = pet?.name || 'the pet';
+  const doctorName = veterinarian?.name || 'Veterinario';
+  const patientName = petOwner?.name || 'un proprietario';
+  const petName = pet?.name || "l'animale";
   const appointmentDate = formatDate(appointment?.appointmentDate);
-  const appointmentTime = appointment?.appointmentTime || 'Not specified';
-  const bookingType = appointment?.bookingType === 'ONLINE' ? 'Online consultation' : 'Clinic visit';
+  const appointmentTime = appointment?.appointmentTime || 'Non specificato';
+  const bookingType = appointment?.bookingType === 'ONLINE' ? 'Consulenza online' : 'Visita in clinica';
   const details = [
-    ['Appointment reference', appointment?.appointmentNumber || appointment?._id],
-    ['Patient', patientName],
-    ['Pet', petName],
-    ['Date', appointmentDate],
-    ['Time', appointmentTime],
-    ['Appointment type', bookingType],
-    ['Reason for visit', appointment?.reason || 'Not specified'],
-    ['Symptoms / notes', appointment?.petSymptoms || appointment?.emergencyDescription || 'Not specified'],
-    ['Clinic', appointment?.clinicName || 'Not specified'],
+    ['Riferimento appuntamento', appointment?.appointmentNumber || appointment?._id],
+    ['Proprietario', patientName],
+    ['Animale', petName],
+    ['Data', appointmentDate],
+    ['Ora', appointmentTime],
+    ['Tipo di appuntamento', bookingType],
+    ['Motivo della visita', appointment?.reason || 'Non specificato'],
+    ['Sintomi / note', appointment?.petSymptoms || appointment?.emergencyDescription || 'Non specificato'],
+    ['Clinica', appointment?.clinicName || 'Non specificata'],
   ];
 
   return sendEmail({
     to: veterinarian.email,
-    subject: `New appointment request from ${patientName}`,
-    text: `Hi ${doctorName},\n\n${patientName} has booked an appointment for ${petName} on ${appointmentDate} at ${appointmentTime}.\n\nPlease sign in to your MyPetPlus panel to accept or reject this appointment request.\n\nThe MyPetPlus Team`,
+    subject: `Nuova richiesta di appuntamento da ${patientName}`,
+    text: `Ciao ${doctorName},\n\n${patientName} ha prenotato un appuntamento per ${petName} il ${appointmentDate} alle ${appointmentTime}.\n\nAccedi al pannello MyPetPlus per accettare o rifiutare la richiesta di appuntamento.\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: 'New appointment request',
-      preview: `${patientName} booked an appointment for ${petName}.`,
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(doctorName)},</p>
-        <p style="font-size:15px;line-height:1.65;">${escapeHtml(patientName)} has requested an appointment with you for ${escapeHtml(petName)}. Please review the details below and sign in to your MyPetPlus panel to <strong>accept or reject</strong> the request.</p>
+      title: 'Nuova richiesta di appuntamento',
+      preview: `${patientName} ha prenotato un appuntamento per ${petName}.`,
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${escapeHtml(doctorName)},</p>
+        <p style="font-size:15px;line-height:1.65;">${escapeHtml(patientName)} ha richiesto un appuntamento con te per ${escapeHtml(petName)}. Controlla i dettagli qui sotto e accedi al pannello MyPetPlus per <strong>accettare o rifiutare</strong> la richiesta.</p>
         ${detailsTable(details)}
-        <p style="font-size:14px;line-height:1.65;color:#4b5563;margin-bottom:0;">The appointment remains pending until you respond.</p>`,
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;margin-bottom:0;">L'appuntamento resterà in attesa fino a quando non darai una risposta.</p>`,
     }),
   });
 };
 
 const sendAppointmentStatusEmail = async ({ petOwner, veterinarian, pet, appointment, status, reason }) => {
-  const patientName = petOwner?.name || 'there';
-  const doctorName = veterinarian?.name || 'your veterinarian';
-  const petName = pet?.name || 'your pet';
+  const patientName = petOwner?.name || 'utente';
+  const doctorName = veterinarian?.name || 'il tuo veterinario';
+  const petName = pet?.name || 'il tuo animale';
   const accepted = String(status).toUpperCase() === 'CONFIRMED';
   const appointmentDate = formatDate(appointment?.appointmentDate);
-  const appointmentTime = appointment?.appointmentTime || 'Not specified';
-  const action = accepted ? 'accepted' : 'rejected';
+  const appointmentTime = appointment?.appointmentTime || 'Non specificato';
+  const action = accepted ? 'accettato' : 'rifiutato';
   const details = [
-    ['Appointment reference', appointment?.appointmentNumber || appointment?._id],
-    ['Veterinarian', doctorName],
-    ['Pet', petName],
-    ['Date', appointmentDate],
-    ['Time', appointmentTime],
-    ...(!accepted && reason ? [['Reason', reason]] : []),
+    ['Riferimento appuntamento', appointment?.appointmentNumber || appointment?._id],
+    ['Veterinario', doctorName],
+    ['Animale', petName],
+    ['Data', appointmentDate],
+    ['Ora', appointmentTime],
+    ...(!accepted && reason ? [['Motivo', reason]] : []),
   ];
 
   return sendEmail({
     to: petOwner.email,
-    subject: `Your appointment has been ${action}`,
-    text: `Hi ${patientName},\n\nYour appointment for ${petName} with ${doctorName} on ${appointmentDate} at ${appointmentTime} has been ${action}.${!accepted && reason ? `\n\nReason: ${reason}` : ''}\n\nThe MyPetPlus Team`,
+    subject: `Il tuo appuntamento è stato ${action}`,
+    text: `Ciao ${patientName},\n\nil tuo appuntamento per ${petName} con ${doctorName} del ${appointmentDate} alle ${appointmentTime} è stato ${action}.${!accepted && reason ? `\n\nMotivo: ${reason}` : ''}\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: accepted ? 'Your appointment has been accepted' : 'Your appointment has been rejected',
-      preview: `Your appointment for ${petName} has been ${action}.`,
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(patientName)},</p>
-        <p style="font-size:15px;line-height:1.65;">${escapeHtml(doctorName)} has <strong>${action}</strong> your appointment request for ${escapeHtml(petName)}.</p>
+      title: accepted ? 'Il tuo appuntamento è stato accettato' : 'Il tuo appuntamento è stato rifiutato',
+      preview: `Il tuo appuntamento per ${petName} è stato ${action}.`,
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${escapeHtml(patientName)},</p>
+        <p style="font-size:15px;line-height:1.65;">${escapeHtml(doctorName)} ha <strong>${action}</strong> la tua richiesta di appuntamento per ${escapeHtml(petName)}.</p>
         ${detailsTable(details)}
-        <p style="font-size:14px;line-height:1.65;color:#4b5563;margin-bottom:0;">${accepted ? 'You can review the appointment in your MyPetPlus panel.' : 'Please sign in to your MyPetPlus panel if you would like to make another booking.'}</p>`,
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;margin-bottom:0;">${accepted ? 'Puoi controllare l’appuntamento dal pannello MyPetPlus.' : 'Accedi al pannello MyPetPlus se desideri effettuare una nuova prenotazione.'}</p>`,
     }),
   });
 };
 
 const sendNewOrderEmail = async ({ pharmacy, customer, order, products }) => {
-  const pharmacyName = pharmacy?.name || 'Pharmacy';
-  const customerName = customer?.name || 'A customer';
+  const pharmacyName = pharmacy?.name || 'Farmacia';
+  const customerName = customer?.name || 'un cliente';
   const productLines = (products || [])
-    .map((item) => `${item.name || 'Product'}${item.variantName ? ` (${item.variantName})` : ''} x${item.quantity} — ${formatAmount(item.total)}`)
+    .map((item) => `${item.name || 'Prodotto'}${item.variantName ? ` (${item.variantName})` : ''} x${item.quantity} — ${formatAmount(item.total)}`)
     .join('\n');
   const productListHtml = (products || []).map((item) => `
     <tr><td style="padding:10px 0;border-bottom:1px solid #e5e7eb;font-size:14px;color:#1f2937;">
-      <strong>${escapeHtml(item.name || 'Product')}</strong>${item.variantName ? `<br><span style="font-size:12px;color:#6b7280;">${escapeHtml(item.variantName)}</span>` : ''}
+      <strong>${escapeHtml(item.name || 'Prodotto')}</strong>${item.variantName ? `<br><span style="font-size:12px;color:#6b7280;">${escapeHtml(item.variantName)}</span>` : ''}
     </td><td style="padding:10px 0;border-bottom:1px solid #e5e7eb;font-size:14px;text-align:center;color:#1f2937;">${escapeHtml(item.quantity)}</td><td style="padding:10px 0;border-bottom:1px solid #e5e7eb;font-size:14px;text-align:right;color:#1f2937;font-weight:600;">${escapeHtml(formatAmount(item.total))}</td></tr>`).join('');
   const address = [
     order?.shippingAddress?.line1,
@@ -369,25 +388,25 @@ const sendNewOrderEmail = async ({ pharmacy, customer, order, products }) => {
 
   return sendEmail({
     to: pharmacy.email,
-    subject: `New order received: ${order?.orderNumber || 'MyPetPlus order'}`,
-    text: `Hi ${pharmacyName},\n\nA new order has been received from ${customerName}.\n\nOrder: ${order?.orderNumber || order?._id}\nProducts:\n${productLines}\n\nOrder amount: ${formatAmount(order?.total)}\nDelivery address: ${address || 'Not specified'}\n\nPlease sign in to your MyPetPlus panel to review and manage this order.\n\nThe MyPetPlus Team`,
+    subject: `Nuovo ordine ricevuto: ${order?.orderNumber || 'ordine MyPetPlus'}`,
+    text: `Ciao ${pharmacyName},\n\nHai ricevuto un nuovo ordine da ${customerName}.\n\nOrdine: ${order?.orderNumber || order?._id}\nProdotti:\n${productLines}\n\nImporto dell'ordine: ${formatAmount(order?.total)}\nIndirizzo di consegna: ${address || 'Non specificato'}\n\nAccedi al pannello MyPetPlus per controllare e gestire questo ordine.\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: 'You have received a new order',
-      preview: `${customerName} placed order ${order?.orderNumber || ''}.`,
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(pharmacyName)},</p>
-        <p style="font-size:15px;line-height:1.65;">A new order has been received from <strong>${escapeHtml(customerName)}</strong>. Please sign in to your MyPetPlus panel to review and manage it.</p>
+      title: 'Hai ricevuto un nuovo ordine',
+      preview: `${customerName} ha effettuato l'ordine ${order?.orderNumber || ''}.`,
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${escapeHtml(pharmacyName)},</p>
+        <p style="font-size:15px;line-height:1.65;">Hai ricevuto un nuovo ordine da <strong>${escapeHtml(customerName)}</strong>. Accedi al pannello MyPetPlus per controllarlo e gestirlo.</p>
         ${detailsTable([
-          ['Order reference', order?.orderNumber || order?._id],
-          ['Customer', customerName],
-          ['Customer email', customer?.email || 'Not specified'],
-          ['Customer phone', customer?.phone || 'Not specified'],
-          ['Order amount', formatAmount(order?.total)],
-          ['Payment status', order?.paymentStatus || 'UNPAID'],
-          ['Delivery address', address || 'Not specified'],
+          ['Riferimento ordine', order?.orderNumber || order?._id],
+          ['Cliente', customerName],
+          ['Email cliente', customer?.email || 'Non specificata'],
+          ['Telefono cliente', customer?.phone || 'Non specificato'],
+          ['Importo dell’ordine', formatAmount(order?.total)],
+          ['Stato del pagamento', paymentStatusLabel(order?.paymentStatus)],
+          ['Indirizzo di consegna', address || 'Non specificato'],
         ])}
-        <h2 style="font-size:16px;margin:24px 0 8px;color:#172033;">Products ordered</h2>
+        <h2 style="font-size:16px;margin:24px 0 8px;color:#172033;">Prodotti ordinati</h2>
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-          <tr><th align="left" style="padding:8px 0;border-bottom:1px solid #d1d5db;font-size:12px;color:#6b7280;text-transform:uppercase;">Product</th><th align="center" style="padding:8px 0;border-bottom:1px solid #d1d5db;font-size:12px;color:#6b7280;text-transform:uppercase;">Qty</th><th align="right" style="padding:8px 0;border-bottom:1px solid #d1d5db;font-size:12px;color:#6b7280;text-transform:uppercase;">Total</th></tr>
+          <tr><th align="left" style="padding:8px 0;border-bottom:1px solid #d1d5db;font-size:12px;color:#6b7280;text-transform:uppercase;">Prodotto</th><th align="center" style="padding:8px 0;border-bottom:1px solid #d1d5db;font-size:12px;color:#6b7280;text-transform:uppercase;">Quantità</th><th align="right" style="padding:8px 0;border-bottom:1px solid #d1d5db;font-size:12px;color:#6b7280;text-transform:uppercase;">Totale</th></tr>
           ${productListHtml}
         </table>`,
     }),
@@ -395,8 +414,8 @@ const sendNewOrderEmail = async ({ pharmacy, customer, order, products }) => {
 };
 
 const sendShippingFeeSetEmail = async ({ petOwner, pharmacy, order }) => {
-  const patientName = petOwner?.name || 'there';
-  const pharmacyName = pharmacy?.name || 'the pharmacy';
+  const patientName = petOwner?.name || 'utente';
+  const pharmacyName = pharmacy?.name || 'la farmacia';
   const shippingFee = Number(order?.finalShipping ?? order?.shipping ?? 0);
   const total = Number(order?.total ?? 0);
   const promisedDeliveryDays = Number(order?.promisedDeliveryDays || 0);
@@ -411,45 +430,45 @@ const sendShippingFeeSetEmail = async ({ petOwner, pharmacy, order }) => {
 
   return sendEmail({
     to: petOwner.email,
-    subject: `Shipping fee set for order ${order?.orderNumber || ''}`.trim(),
-    text: `Hi ${patientName},\n\n${pharmacyName} has set the shipping fee for your order.\n\nOrder: ${order?.orderNumber || order?._id}\nShipping fee: ${formatAmount(shippingFee)}\nUpdated total: ${formatAmount(total)}\nEstimated delivery: ${promisedDeliveryDays ? `${promisedDeliveryDays} Days` : '2-5 Days'}\nExpected delivery date: ${expectedDeliveryDate}\n\nYou can now complete payment in your MyPetPlus panel. The order will continue processing after payment is received.\n\nThe MyPetPlus Team`,
+    subject: `Costo di spedizione impostato per l'ordine ${order?.orderNumber || ''}`.trim(),
+    text: `Ciao ${patientName},\n\n${pharmacyName} ha impostato il costo di spedizione per il tuo ordine.\n\nOrdine: ${order?.orderNumber || order?._id}\nCosto di spedizione: ${formatAmount(shippingFee)}\nTotale aggiornato: ${formatAmount(total)}\nConsegna stimata: ${promisedDeliveryDays ? `${promisedDeliveryDays} giorni` : '2-5 giorni'}\nData di consegna prevista: ${expectedDeliveryDate}\n\nOra puoi completare il pagamento dal pannello MyPetPlus. L'ordine continuerà a essere elaborato dopo la ricezione del pagamento.\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: 'Your order is ready for payment',
-      preview: `The shipping fee for your order has been set.`,
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(patientName)},</p>
-        <p style="font-size:15px;line-height:1.65;">${escapeHtml(pharmacyName)} has set the shipping fee for your order. You can now complete payment in your MyPetPlus panel.</p>
+      title: 'Il tuo ordine è pronto per il pagamento',
+      preview: 'Il costo di spedizione per il tuo ordine è stato impostato.',
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${escapeHtml(patientName)},</p>
+        <p style="font-size:15px;line-height:1.65;">${escapeHtml(pharmacyName)} ha impostato il costo di spedizione per il tuo ordine. Ora puoi completare il pagamento dal pannello MyPetPlus.</p>
         ${detailsTable([
-          ['Order reference', order?.orderNumber || order?._id],
-          ['Shipping fee', formatAmount(shippingFee)],
-          ['Updated total', formatAmount(total)],
-          ['Pharmacy delivery commitment', promisedDeliveryDays ? `${promisedDeliveryDays} Days` : '2-5 Days'],
-          ['Expected delivery date', expectedDeliveryDate],
-          ['Delivery address', address || 'Not specified'],
+          ['Riferimento ordine', order?.orderNumber || order?._id],
+          ['Costo di spedizione', formatAmount(shippingFee)],
+          ['Totale aggiornato', formatAmount(total)],
+          ['Impegno di consegna della farmacia', promisedDeliveryDays ? `${promisedDeliveryDays} giorni` : '2-5 giorni'],
+          ['Data di consegna prevista', expectedDeliveryDate],
+          ['Indirizzo di consegna', address || 'Non specificato'],
         ])}
-        <div style="padding:14px 16px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:8px;font-size:14px;line-height:1.6;color:#1f2937;">Your order will continue processing once payment has been received.</div>`,
+        <div style="padding:14px 16px;background:#edf7fb;border:1px solid #c9e7f0;border-radius:8px;font-size:14px;line-height:1.6;color:#1f2937;">L'ordine continuerà a essere elaborato dopo la ricezione del pagamento.</div>`,
     }),
   });
 };
 
 const sendContactQueryResolutionEmail = async ({ query, responseMessage }) => {
-  const recipientName = query?.name || 'there';
+  const recipientName = query?.name || 'utente';
   const responseHtml = escapeHtml(responseMessage).replace(/\r?\n/g, '<br />');
 
   return sendEmail({
     to: query.email,
-    subject: 'Response to your MyPetPlus enquiry',
-    text: `Hi ${recipientName},\n\nThank you for contacting MyPetPlus.\n\n${responseMessage}\n\nThe MyPetPlus Team`,
+    subject: 'Risposta alla tua richiesta a MyPetPlus',
+    text: `Ciao ${recipientName},\n\nGrazie per aver contattato MyPetPlus.\n\n${responseMessage}\n\nIl team MyPetPlus`,
     html: emailLayout({
-      title: 'Response to your enquiry',
-      preview: 'MyPetPlus has responded to your Contact Us enquiry.',
-      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Hi ${escapeHtml(recipientName)},</p>
-        <p style="font-size:15px;line-height:1.65;">Thank you for contacting MyPetPlus. Our team has reviewed your enquiry and provided the response below.</p>
+      title: 'Risposta alla tua richiesta',
+      preview: 'MyPetPlus ha risposto alla tua richiesta di contatto.',
+      body: `<p style="font-size:15px;line-height:1.65;margin:0;">Ciao ${escapeHtml(recipientName)},</p>
+        <p style="font-size:15px;line-height:1.65;">Grazie per aver contattato MyPetPlus. Il nostro team ha esaminato la tua richiesta e ha fornito la risposta riportata di seguito.</p>
         <div style="margin:20px 0;padding:18px;background:#f8fafc;border-left:4px solid #2d92b5;border-radius:4px;font-size:15px;line-height:1.7;color:#1f2937;">${responseHtml}</div>
         ${detailsTable([
-          ['Your requested service', query?.services || 'Not specified'],
-          ['Your original message', query?.message || 'Not specified'],
+          ['Servizio richiesto', query?.services || 'Non specificato'],
+          ['Messaggio originale', query?.message || 'Non specificato'],
         ])}
-        <p style="font-size:14px;line-height:1.65;color:#4b5563;margin-bottom:0;">If you need further assistance, please submit another enquiry and our team will be happy to help.</p>`,
+        <p style="font-size:14px;line-height:1.65;color:#4b5563;margin-bottom:0;">Se hai bisogno di ulteriore assistenza, invia una nuova richiesta e il nostro team sarà lieto di aiutarti.</p>`,
     }),
   });
 };

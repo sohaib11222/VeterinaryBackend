@@ -31,6 +31,7 @@ const getProfileForUser = async (userId, publicOnly = false) => {
     .populate('petSitterProfile')
     .lean();
   if (!user) throw new Error('Pet sitter not found');
+  if (publicOnly && !user.petSitterProfile?.profileCompleted) throw new Error('Pet sitter not found');
   return publicProfile(user, user.petSitterProfile);
 };
 
@@ -45,7 +46,9 @@ const listPublic = async (options = {}) => {
     { fullName: { $regex: search, $options: 'i' } },
     { 'address.city': { $regex: search, $options: 'i' } },
   ];
-  const profileQuery = petType ? { petTypes: petType, isAvailable: true } : { isAvailable: true };
+  const profileQuery = petType
+    ? { petTypes: petType, isAvailable: true, profileCompleted: true }
+    : { isAvailable: true, profileCompleted: true };
   const profiles = await PetSitterProfile.find(profileQuery).select('userId').lean();
   query.petSitterProfile = { $in: profiles.map((profile) => profile._id) };
   const [users, total] = await Promise.all([
@@ -78,7 +81,7 @@ const updateMyProfile = async (userId, payload = {}) => {
   ['servicesOffered', 'petTypes', 'availability', 'certifications', 'documents'].forEach((field) => {
     if (payload[field] !== undefined) profile[field] = normalizeArray(payload[field]);
   });
-  profile.profileCompleted = Boolean(profile.bio || profile.petTypes.length || profile.servicesOffered.length);
+  profile.profileCompleted = Boolean(profile.petTypes.length && profile.servicesOffered.length);
   await Promise.all([user.save(), profile.save()]);
   return getProfileForUser(userId);
 };

@@ -5,6 +5,7 @@ const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { ORDER_STATUS, PAYMENT_STATUS } = require('../types/enums');
 const { sendNewOrderEmail, sendShippingFeeSetEmail } = require('./email.service');
+const notificationService = require('./notification.service');
 const {
   DELIVERY_DAY_OPTIONS,
   DELIVERY_STATUS,
@@ -271,6 +272,17 @@ const createOrder = async (petOwnerId, items, shippingAddress, paymentMethod = n
         products: orderedProducts,
       }).catch((error) => logEmailFailure('new order', error));
     }
+
+    // The mobile and web dashboards use this durable notification for the
+    // Orders attention indicator. Email delivery must never make an order
+    // fail, and neither must an optional in-app notification.
+    await notificationService.createNotification({
+      userId: petStoreData.ownerId,
+      title: 'New order received',
+      body: `${petOwner?.name || 'A customer'} placed order ${order.orderNumber || order._id}.`,
+      type: 'ORDER',
+      data: { orderId: order._id.toString(), orderNumber: order.orderNumber || null },
+    }).catch((error) => console.error('[notification] Failed to create new order notification:', error?.message || error));
 
     createdOrders.push(order);
   }

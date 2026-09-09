@@ -222,7 +222,7 @@ const register = async (data) => {
       availability: Array.isArray(data.availability) ? data.availability : [],
       certifications: Array.isArray(data.certifications) ? data.certifications : [],
       documents: Array.isArray(data.documents) ? data.documents : [],
-      profileCompleted: Boolean(data.bio || data.petTypes?.length || data.servicesOffered?.length),
+      profileCompleted: Boolean(data.petTypes?.length && data.servicesOffered?.length),
     });
     user.petSitterProfile = petSitterProfile._id;
     await user.save();
