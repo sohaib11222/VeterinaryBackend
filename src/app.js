@@ -13,7 +13,12 @@ const app = express();
 // General API requests should fail quickly, but chat uploads can legitimately
 // take longer on mobile connections (each file may be up to 50 MB).
 app.use((req, res, next) => {
-  const requestTimeout = req.path.startsWith('/api/upload/') || req.path.startsWith('/api/support-tickets/attachments') ? 120000 : 30000;
+  const requestTimeout = req.path.startsWith('/api/upload/')
+    || req.path.startsWith('/api/support-tickets/attachments')
+    || req.path === '/api/auth/register-pet-sitter'
+    || req.path === '/api/pet-sitters/me/documents'
+    ? 120000
+    : 30000;
   return timeout(requestTimeout)(req, res, next);
 });
 

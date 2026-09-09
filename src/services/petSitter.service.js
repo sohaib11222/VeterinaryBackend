@@ -83,6 +83,18 @@ const updateMyProfile = async (userId, payload = {}) => {
   return getProfileForUser(userId);
 };
 
+const addDocuments = async (userId, documents = []) => {
+  validateObjectId(userId, 'User ID');
+  if (!documents.length) throw new Error('Please select at least one document');
+  const profile = await PetSitterProfile.findOneAndUpdate(
+    { userId },
+    { $push: { documents: { $each: documents } } },
+    { new: true }
+  );
+  if (!profile) throw new Error('Pet sitter profile not found');
+  return getProfileForUser(userId);
+};
+
 const listAdmin = async (options = {}) => {
   const page = Math.max(1, Number(options.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(options.limit) || 20));
@@ -111,4 +123,4 @@ const setStatus = async (userId, status) => {
   return publicProfile(user, user.petSitterProfile);
 };
 
-module.exports = { listPublic, getProfileForUser, updateMyProfile, listAdmin, setStatus, publicProfile };
+module.exports = { listPublic, getProfileForUser, updateMyProfile, addDocuments, listAdmin, setStatus, publicProfile };
