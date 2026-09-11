@@ -43,6 +43,7 @@ const userSchema = new mongoose.Schema({
     line2: { type: String, default: null },
     city: { type: String, default: null },
     state: { type: String, default: null },
+    region: { type: String, default: null },
     country: { type: String, default: null },
     zip: { type: String, default: null }
   },

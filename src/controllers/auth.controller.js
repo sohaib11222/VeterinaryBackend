@@ -37,6 +37,7 @@ exports.registerPetSitter = asyncHandler(async (req, res) => {
       line1: req.body.address || null,
       city: req.body.city || null,
       state: req.body.province || req.body.state || null,
+      region: req.body.region || null,
       country: req.body.region || req.body.country || null,
       zip: req.body.postalCode || req.body.cap || req.body.zip || null,
     },

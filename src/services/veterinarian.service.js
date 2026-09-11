@@ -346,6 +346,10 @@ const listVeterinarians = async (filter = {}) => {
   const {
     specialization,
     city,
+    province,
+    region,
+    postalCode,
+    location,
     isFeatured,
     isAvailableOnline,
     search,
@@ -362,10 +366,6 @@ const listVeterinarians = async (filter = {}) => {
     if (specializationValues.length > 0) {
       query.specializations = { $in: specializationValues };
     }
-  }
-
-  if (hasText(city)) {
-    query['clinics.city'] = { $regex: escapeRegExp(city.trim()), $options: 'i' };
   }
 
   if (isFeatured !== undefined) {
@@ -386,19 +386,80 @@ const listVeterinarians = async (filter = {}) => {
     .lean()
     .maxTimeMS(2000);
 
-  approvedVeterinarianIds = approvedVeterinarians.map(vet => vet._id);
+  approvedVeterinarianIds = approvedVeterinarians.map(vet => String(vet._id));
 
-  // Keep an explicit empty match set. Previously a failed search returned every
-  // approved veterinarian because the user-id filter was left unchanged.
-  if (search && typeof search === 'string' && search.trim()) {
+  // Build one location matcher per stored location. Every supplied filter is
+  // required, while the provider may have the matching data on either the
+  // veterinarian profile clinic or the associated User address.
+  const locationParts = [];
+  const addLocationField = (field, value) => {
+    if (hasText(value)) locationParts.push({ [field]: { $regex: escapeRegExp(value.trim()), $options: 'i' } });
+  };
+  addLocationField('city', city);
+  addLocationField('state', province);
+  addLocationField('zip', postalCode);
+  if (hasText(region)) locationParts.push({ $or: [
+    { region: { $regex: escapeRegExp(region.trim()), $options: 'i' } },
+    { state: { $regex: escapeRegExp(region.trim()), $options: 'i' } },
+    { country: { $regex: escapeRegExp(region.trim()), $options: 'i' } },
+  ] });
+  if (hasText(location)) locationParts.push({ $or: [
+    { city: { $regex: escapeRegExp(location.trim()), $options: 'i' } },
+    { state: { $regex: escapeRegExp(location.trim()), $options: 'i' } },
+    { region: { $regex: escapeRegExp(location.trim()), $options: 'i' } },
+    { country: { $regex: escapeRegExp(location.trim()), $options: 'i' } },
+    { zip: { $regex: escapeRegExp(location.trim()), $options: 'i' } },
+  ] });
+
+  const hasLocationFilter = locationParts.length > 0;
+  const clinicLocationQuery = hasLocationFilter ? { $elemMatch: { $and: locationParts } } : null;
+  const addressLocationQuery = hasLocationFilter ? { $and: locationParts.map((part) => {
+    const remap = (value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key === 'city' || key === 'state' || key === 'region' || key === 'country' || key === 'zip' ? `address.${key}` : key, remap(nested)]));
+    };
+    return remap(part);
+  }) } : null;
+
+  const matchingIdsForSearch = async () => {
+    if (!hasText(search)) return new Set(approvedVeterinarianIds);
     const searchRegex = new RegExp(escapeRegExp(search.trim()), 'i');
-    const matchingIds = approvedVeterinarians
-      .filter((v) => [v.name, v.fullName, v.email].some((value) => value && searchRegex.test(value)))
-      .map(v => v._id);
-    approvedVeterinarianIds = matchingIds;
-  }
+    const matchingUserIds = approvedVeterinarians
+      .filter((vet) => [vet.name, vet.fullName, vet.email].some((value) => value && searchRegex.test(value)))
+      .map((vet) => String(vet._id));
+    const matchingProfiles = await VeterinarianProfile.find({
+      userId: { $in: approvedVeterinarianIds },
+      $or: [
+        { 'clinics.city': searchRegex },
+        { 'clinics.state': searchRegex },
+        { 'clinics.region': searchRegex },
+        { 'clinics.country': searchRegex },
+        { 'clinics.zip': searchRegex },
+      ],
+    }).select('userId').lean().maxTimeMS(2000);
+    return new Set([
+      ...matchingUserIds,
+      ...matchingProfiles.map((profile) => String(profile.userId)),
+    ]);
+  };
 
-  query.userId = { $in: approvedVeterinarianIds };
+  const matchingIdsForLocation = async () => {
+    if (!hasLocationFilter) return new Set(approvedVeterinarianIds);
+    const [matchingProfiles, matchingUsers] = await Promise.all([
+      VeterinarianProfile.find({ userId: { $in: approvedVeterinarianIds }, clinics: clinicLocationQuery })
+        .select('userId').lean().maxTimeMS(2000),
+      User.find({ role: 'VETERINARIAN', status: 'APPROVED', ...addressLocationQuery })
+        .select('_id').lean().maxTimeMS(2000),
+    ]);
+    return new Set([
+      ...matchingProfiles.map((profile) => String(profile.userId)),
+      ...matchingUsers.map((user) => String(user._id)),
+    ]);
+  };
+
+  const [searchIds, locationIds] = await Promise.all([matchingIdsForSearch(), matchingIdsForLocation()]);
+  const matchingVeterinarianIds = approvedVeterinarianIds.filter((id) => searchIds.has(id) && locationIds.has(id));
+  query.userId = { $in: matchingVeterinarianIds };
 
   const skip = (currentPage - 1) * pageSize;
 

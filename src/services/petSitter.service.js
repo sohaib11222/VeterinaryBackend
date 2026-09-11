@@ -47,15 +47,36 @@ const listPublic = async (options = {}) => {
   const city = String(options.city || '').trim();
   const province = String(options.province || options.state || '').trim();
   const postalCode = String(options.postalCode || options.cap || options.zip || '').trim();
+  const region = String(options.region || '').trim();
+  const location = String(options.location || '').trim();
   const query = { role: USER_ROLES.PET_SITTER, status: USER_STATUS.APPROVED };
-  if (search) query.$or = [
+  const filters = [];
+  if (search) filters.push({ $or: [
     { name: contains(search) },
     { fullName: contains(search) },
+    { email: contains(search) },
     { 'address.city': contains(search) },
-  ];
-  if (city) query['address.city'] = contains(city);
-  if (province) query['address.state'] = contains(province);
-  if (postalCode) query['address.zip'] = contains(postalCode);
+    { 'address.state': contains(search) },
+    { 'address.region': contains(search) },
+    { 'address.country': contains(search) },
+    { 'address.zip': contains(search) },
+  ] });
+  if (location) filters.push({ $or: [
+    { 'address.city': contains(location) },
+    { 'address.state': contains(location) },
+    { 'address.region': contains(location) },
+    { 'address.country': contains(location) },
+    { 'address.zip': contains(location) },
+  ] });
+  if (city) filters.push({ 'address.city': contains(city) });
+  if (province) filters.push({ 'address.state': contains(province) });
+  if (region) filters.push({ $or: [
+    { 'address.region': contains(region) },
+    { 'address.state': contains(region) },
+    { 'address.country': contains(region) },
+  ] });
+  if (postalCode) filters.push({ 'address.zip': contains(postalCode) });
+  if (filters.length) query.$and = filters;
   const profileQuery = petType
     ? { petTypes: petType, isAvailable: true, profileCompleted: true }
     : { isAvailable: true, profileCompleted: true };
@@ -82,7 +103,11 @@ const updateMyProfile = async (userId, payload = {}) => {
   allowedUserFields.forEach((field) => {
     if (payload[field] !== undefined) user[field] = payload[field];
   });
-  if (payload.address !== undefined) user.address = typeof payload.address === 'object' ? payload.address : { line1: payload.address };
+  if (payload.address !== undefined) {
+    user.address = typeof payload.address === 'object'
+      ? { ...(user.address?.toObject?.() || user.address || {}), ...payload.address }
+      : { ...(user.address?.toObject?.() || user.address || {}), line1: payload.address };
+  }
   const profileFields = ['bio', 'petSittingExperience', 'isAvailable'];
   profileFields.forEach((field) => {
     if (payload[field] !== undefined) profile[field] = payload[field];
