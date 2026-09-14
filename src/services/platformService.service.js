@@ -141,6 +141,7 @@ const listProviders = async (slug, options = {}) => {
     const profile = vetMap.get(String(user._id)) || sitterMap.get(String(user._id)) || null;
     const address = store?.address || user.address;
     if (!matchesLocation(address)) return [];
+    if (!includes(store?.name || user.fullName || user.name, options.search)) return [];
     return [{ id: user._id, role: user.role, name: store?.name || user.fullName || user.name, profileImage: store?.logo || user.profileImage, phone: store?.phone || user.phone, address, offering, profile, storeId: store?._id || null }];
   });
   const total = providers.length;

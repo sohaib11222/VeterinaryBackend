@@ -157,11 +157,11 @@ router.post(
 /**
  * @route   POST /api/upload/chat
  * @desc    Upload file for chat (supports all file types - images, PDFs, documents, etc.)
- * @access  Private (Admin, Veterinarian, Pet Owner)
+ * @access  Private (Admin, Veterinarian, Pet Owner, Pharmacy, Parapharmacy, Pet Sitter)
  */
 router.post(
   '/chat',
-  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_SITTER']),
+  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_STORE', 'PARAPHARMACY', 'PET_SITTER']),
   uploadSingleChatFile('chat'),
   asyncHandler(uploadController.uploadSingleFile)
 );
@@ -169,11 +169,11 @@ router.post(
 /**
  * @route   POST /api/upload/chat/multiple
  * @desc    Upload multiple files for chat (supports all file types)
- * @access  Private (Admin, Veterinarian, Pet Owner)
+ * @access  Private (Admin, Veterinarian, Pet Owner, Pharmacy, Parapharmacy, Pet Sitter)
  */
 router.post(
   '/chat/multiple',
-  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_SITTER']),
+  authGuard(['ADMIN', 'VETERINARIAN', 'PET_OWNER', 'PET_STORE', 'PARAPHARMACY', 'PET_SITTER']),
   uploadMultipleChatFiles('chat', 10),
   asyncHandler(uploadController.uploadMultipleFiles)
 );
