@@ -35,6 +35,7 @@ router.use('/notifications', require('./notification.routes'));
 router.use('/admin', require('./admin.routes'));
 router.use('/upload', require('./upload.routes'));
 router.use('/specializations', require('./specialization.routes'));
+router.use('/platform-services', require('./platformService.routes'));
 router.use('/availability', require('./availability.routes'));
 router.use('/weekly-schedule', require('./weeklySchedule.routes'));
 router.use('/balance', require('./balance.routes'));
