@@ -88,15 +88,33 @@ const issueVerificationCode = async (user, purpose) => {
       });
 
     if (delivery?.skipped) {
-      throw new Error('Email delivery is not configured');
+      const configurationError = new Error('Email delivery is not configured');
+      configurationError.code = 'EMAIL_DELIVERY_FAILED';
+      throw configurationError;
     }
   } catch (error) {
     await PasswordReset.deleteOne({ _id: verification._id });
-    throw new Error(error?.message || 'Failed to send verification code');
+    const verificationError = new Error(
+      error?.code === 'EMAIL_DELIVERY_FAILED'
+        ? 'We could not send your verification email right now. Please try again shortly.'
+        : 'Failed to send verification code'
+    );
+    verificationError.code = error?.code;
+    throw verificationError;
   }
 };
 
 const issuePasswordVerificationCode = (user, purpose) => issueVerificationCode(user, purpose);
+
+const tryIssueRegistrationVerificationCode = async (user) => {
+  try {
+    await issueVerificationCode(user, EMAIL_VERIFICATION_PURPOSE);
+    return true;
+  } catch (error) {
+    if (error?.code === 'EMAIL_DELIVERY_FAILED') return false;
+    throw error;
+  }
+};
 
 const findValidPasswordCode = async (email, purpose, code, userId = null) => {
   const normalizedEmail = normalizeEmail(email);
@@ -141,9 +159,10 @@ const register = async (data) => {
       !existingUser.isEmailVerified &&
       normalizeEmail(existingUser.email) === normalizeEmail(email)
     ) {
-      await issueVerificationCode(existingUser, EMAIL_VERIFICATION_PURPOSE);
+      const verificationEmailSent = await tryIssueRegistrationVerificationCode(existingUser);
       return {
         requiresEmailVerification: true,
+        verificationEmailSent,
         email: existingUser.email,
         user: {
           id: existingUser._id,
@@ -229,15 +248,14 @@ const register = async (data) => {
   }
 
   if (requiresEmailVerification) {
-    try {
-      await issueVerificationCode(user, EMAIL_VERIFICATION_PURPOSE);
-    } catch (error) {
-      await User.deleteOne({ _id: user._id });
-      throw error;
-    }
+    // Keep the account in its pending state if SMTP is momentarily down. The
+    // person can safely use "resend code" after delivery is restored instead
+    // of losing the registration and receiving a raw provider error.
+    const verificationEmailSent = await tryIssueRegistrationVerificationCode(user);
 
     return {
       requiresEmailVerification: true,
+      verificationEmailSent,
       email: user.email,
       user: {
         id: user._id,

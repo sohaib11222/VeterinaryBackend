@@ -10,6 +10,8 @@ const normalizeKind = (kind) => {
   return '';
 };
 
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const deriveKindFromOwner = (owner) => {
   const role = String(owner?.role || '').trim().toUpperCase();
   return role === 'PARAPHARMACY' ? 'PARAPHARMACY' : 'PHARMACY';
@@ -37,7 +39,26 @@ const hasActivePharmacySubscription = async (ownerId) => {
 };
 
 const getSetupState = async (petStore, owner = null) => {
-  if (!petStore?.ownerId) throw new Error('Pet store owner is required');
+  if (!petStore?.ownerId) {
+    // Keep one malformed legacy record from breaking the entire public list.
+    // It cannot be public because there is no account for approval or a
+    // subscription, but administrators can still repair it from the back
+    // office without causing a 500 for every visitor.
+    const profileCompleted = isPetStoreProfileComplete(petStore);
+    return {
+      kind: 'PHARMACY',
+      isApproved: false,
+      profileCompleted,
+      requiresSubscription: true,
+      hasActiveSubscription: false,
+      setupCompleted: false,
+      isPublic: false,
+      requirements: [
+        { key: 'profile', label: 'Complete your Pharmacy profile', complete: profileCompleted },
+        { key: 'subscription', label: 'Activate your Pharmacy subscription', complete: false },
+      ],
+    };
+  }
   const ownerRecord = owner || await User.findById(petStore.ownerId)
     .select('role status')
     .lean()
@@ -49,7 +70,12 @@ const getSetupState = async (petStore, owner = null) => {
     ? await hasActivePharmacySubscription(petStore.ownerId)
     : true;
   const isApproved = String(ownerRecord?.status || '').toUpperCase() === 'APPROVED';
-  const isPublic = Boolean(petStore.isActive) && isApproved && profileCompleted && hasActiveSubscription;
+  // Onboarding completion and public visibility are deliberately different
+  // states. A retailer can finish its own profile and subscription before an
+  // administrator approves the account. Treating an approval wait as an
+  // unfinished setup caused the dashboard modal to reopen forever.
+  const setupCompleted = profileCompleted && (!requiresSubscription || hasActiveSubscription);
+  const isPublic = Boolean(petStore.isActive) && isApproved && setupCompleted;
 
   return {
     kind,
@@ -57,6 +83,7 @@ const getSetupState = async (petStore, owner = null) => {
     profileCompleted,
     requiresSubscription,
     hasActiveSubscription,
+    setupCompleted,
     isPublic,
     requirements: [
       { key: 'profile', label: `Complete your ${kind === 'PARAPHARMACY' ? 'Parapharmacy' : 'Pharmacy'} profile`, complete: profileCompleted },
@@ -69,11 +96,14 @@ const refreshPetStoreSetup = async (petStoreId) => {
   const petStore = await PetStore.findById(petStoreId).maxTimeMS(2000);
   if (!petStore) throw new Error('Pet store not found');
   const setup = await getSetupState(petStore);
-  const hasChanged = petStore.profileCompleted !== setup.profileCompleted || petStore.isPublic !== setup.isPublic;
+  const shouldHaveCompletedAt = setup.setupCompleted;
+  const hasChanged = petStore.profileCompleted !== setup.profileCompleted
+    || petStore.isPublic !== setup.isPublic
+    || Boolean(petStore.setupCompletedAt) !== shouldHaveCompletedAt;
   if (hasChanged) {
     petStore.profileCompleted = setup.profileCompleted;
     petStore.isPublic = setup.isPublic;
-    petStore.setupCompletedAt = setup.isPublic ? (petStore.setupCompletedAt || new Date()) : null;
+    petStore.setupCompletedAt = shouldHaveCompletedAt ? (petStore.setupCompletedAt || new Date()) : null;
     await petStore.save();
   }
   return { ...petStore.toObject(), setup };
@@ -91,6 +121,7 @@ const getSetupStatusForOwner = async (ownerId) => {
       kind,
       requiresSubscription,
       hasActiveSubscription: !requiresSubscription,
+      setupCompleted: false,
       isPublic: false,
       requirements: [
         { key: 'profile', label: `Create and complete your ${kind === 'PARAPHARMACY' ? 'Parapharmacy' : 'Pharmacy'} profile`, complete: false },
@@ -252,7 +283,12 @@ const listPetStores = async (filter = {}) => {
 
   const normalizedKind = normalizeKind(kind);
   if (normalizedKind) {
-    const roleFilter = normalizedKind === 'PARAPHARMACY' ? 'PARAPHARMACY' : 'PET_STORE';
+    // Pharmacy records created before the current seller-role split can have
+    // an approved non-PET_STORE owner. They are still pharmacies, whereas a
+    // PARAPHARMACY owner must remain in the separate tab.
+    const roleFilter = normalizedKind === 'PARAPHARMACY'
+      ? 'PARAPHARMACY'
+      : { $ne: 'PARAPHARMACY' };
     const owners = await User.find({ role: roleFilter })
       .select('_id')
       .lean()
@@ -276,13 +312,14 @@ const listPetStores = async (filter = {}) => {
   }
 
   if (city) {
-    query['address.city'] = { $regex: city, $options: 'i' };
+    query['address.city'] = { $regex: escapeRegex(city), $options: 'i' };
   }
 
   if (search) {
+    const escapedSearch = escapeRegex(search);
     query.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { 'address.city': { $regex: search, $options: 'i' } }
+      { name: { $regex: escapedSearch, $options: 'i' } },
+      { 'address.city': { $regex: escapedSearch, $options: 'i' } }
     ];
   }
 
@@ -300,9 +337,13 @@ const listPetStores = async (filter = {}) => {
       kind: refreshed.setup.kind,
     };
   }));
+  // The public directory should not disappear merely because an existing
+  // retailer has not passed through a newer dashboard onboarding sequence.
+  // Active stores remain protected by the existing owner-approval check;
+  // incomplete or unapproved accounts cannot be discovered publicly.
   const visibleStores = includeAll
     ? normalizedWithSetup
-    : normalizedWithSetup.filter((petStore) => petStore.setup.isPublic);
+    : normalizedWithSetup.filter((petStore) => Boolean(petStore.isActive) && petStore.setup?.isApproved);
   const currentPage = Math.max(1, Number(page) || 1);
   const normalizedLimit = Math.min(100, Math.max(1, Number(limit) || 10));
   const total = visibleStores.length;

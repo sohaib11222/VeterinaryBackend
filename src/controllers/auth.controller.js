@@ -8,7 +8,9 @@ const { sendSuccess, sendError } = require('../utils/response');
 exports.register = asyncHandler(async (req, res) => {
   const result = await authService.register(req.body);
   const message = result?.requiresEmailVerification
-    ? 'Verification code sent to your email address'
+    ? result?.verificationEmailSent === false
+      ? 'Registration created. Verification email delivery is temporarily unavailable; please try again shortly.'
+      : 'Verification code sent to your email address'
     : 'Registration successful';
   return sendSuccess(res, message, result, 201);
 });
@@ -48,7 +50,10 @@ exports.registerPetSitter = asyncHandler(async (req, res) => {
     certifications: parse(req.body.certifications),
     documents,
   });
-  return sendSuccess(res, 'Verification code sent to your email address', result, 201);
+  const message = result?.verificationEmailSent === false
+    ? 'Registration created. Verification email delivery is temporarily unavailable; please try again shortly.'
+    : 'Verification code sent to your email address';
+  return sendSuccess(res, message, result, 201);
 });
 
 exports.verifyEmail = asyncHandler(async (req, res) => {

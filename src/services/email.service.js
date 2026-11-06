@@ -136,10 +136,12 @@ const sendEmail = async ({ to, subject, text, html }) => {
       code: error?.code,
       command: error?.command,
       responseCode: error?.responseCode,
-      response: error?.response,
-      message: error?.message,
     });
-    throw error;
+    // Provider responses can include sensitive authentication details. Keep
+    // the diagnostic logs minimal and never pass a raw SMTP error to the API.
+    const deliveryError = new Error('Email delivery is temporarily unavailable');
+    deliveryError.code = 'EMAIL_DELIVERY_FAILED';
+    throw deliveryError;
   }
 };
 
